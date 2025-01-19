@@ -197,3 +197,38 @@ Sepolia 테스트넷에서 개발을 시작하기 위한 단계:
     스마트 컨트랙트 배포 비용 = 1,000,000 × 50 Gwei = 0.05 ETH (약 $100~150)
     ```
   * 네트워크 상황에 따라 가스비가 크게 변동될 수 있음
+```
+
+## 보안 설정 가이드
+
+### 1. 환경 변수 설정
+1. `.env.example` 파일을 복사하여 `.env` 파일 생성
+```bash
+cp .env.example .env
+```
+2. `.env` 파일에 실제 값들을 입력
+   - Firebase 설정
+   - 스마트 컨트랙트 주소
+   - OAuth 인증 정보
+   - 게임 설정 값
+
+### 2. 키스토어 설정 (Android 릴리즈 빌드용)
+1. 키스토어 생성
+```bash
+./upload-keystore.sh
+```
+2. 생성된 키스토어 정보 안전하게 백업
+3. `android/gradle.properties`에 키스토어 설정 추가
+
+### 3. Firebase 설정
+1. Firebase 콘솔에서 프로젝트 설정
+2. 안드로이드/iOS 앱 등록
+3. 설정 파일 다운로드:
+   - Android: `google-services.json`를 `android/app/`에 복사
+   - iOS: `GoogleService-Info.plist`를 `ios/`에 복사
+
+### 4. 보안 주의사항
+- 키스토어 파일 (.jks)은 절대 Git에 커밋하지 않기
+- 환경 변수 파일 (.env)은 절대 Git에 커밋하지 않기
+- Firebase 설정 파일은 절대 Git에 커밋하지 않기
+- 개인 키나 토큰은 안전한 방식으로 관리

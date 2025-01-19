@@ -11,11 +11,6 @@ expo-env.d.ts
 
 # Native
 *.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
 
 # Metro
 .metro-health-check*
@@ -27,10 +22,39 @@ yarn-error.*
 
 # macOS
 .DS_Store
+
+# 보안 관련 파일
+*.jks
+*.keystore
+upload-keystore.jks
+keystore.properties
+local.properties
+
+# 환경 설정
+.env
+.env.*
+!.env.example
+firebase.config.ts
+google-services.json
+GoogleService-Info.plist
+
+# 빌드 백업 및 캐시
+build_backup_*
+keystore_backup_*
+.gradle/
+build/
+android/app/build/
+ios/build/
+
+# 개발 도구 설정
+.idea/
+.vscode/
+*.iml
+
+# 의존성
+
+# 기타 민감한 정보
+*.key
 *.pem
-
-# local env files
-.env*.local
-
-# typescript
-*.tsbuildinfo
+*.p12
+secrets.json
