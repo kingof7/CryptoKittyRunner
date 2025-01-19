@@ -229,7 +229,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     try {
       console.log('카카오 로그인 시작');
       console.log('현재 플랫폼:', Platform.OS);
-      
+
       // window 객체가 있는지 확인하여 웹 환경 체크
       const isWeb = typeof window !== 'undefined';
       console.log('웹 환경 여부:', isWeb);
@@ -323,7 +323,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Image
-        source={require('../assets/images/logo.png')}
+        source={require('../assets/images/logo.jpeg')}
         style={styles.logo}
       />
       <TouchableOpacity

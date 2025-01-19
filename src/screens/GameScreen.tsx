@@ -17,25 +17,26 @@ import { GameScreenProps } from '../types/navigation';
 import { MiningService } from '../services/MiningService';
 import { MiningStats } from '../types/mining';
 import * as ethers from 'ethers';
+import Cat from '../components/Cat';
+import Coin from '../components/Coin';
+import Gold from '../components/Gold';
 
 const { width, height } = Dimensions.get('window');
 
 // 물리 엔진 객체 생성 함수들
-const createFloor = (world: Matter.World, pos: { x: number; y: number }, width: number) => {
-  const body = Matter.Bodies.rectangle(pos.x, pos.y, width, 20, {
-    isStatic: true,
-    label: 'floor',
-  });
-  Matter.World.add(world, body);
-  return { body, pos, width };
-};
-
 const createCat = (world: Matter.World, pos: { x: number; y: number }) => {
-  const body = Matter.Bodies.rectangle(pos.x, pos.y, 50, 50, {
-    label: 'cat',
-    friction: 1,
-    restitution: 0.2,
-  });
+  const body = Matter.Bodies.rectangle(
+    pos.x,
+    pos.y,
+    72,  // 물리적 크기도 72x72로 조정
+    72,
+    {
+      label: 'cat',
+      friction: 1,
+      restitution: 0.2,
+      mass: 1,
+    }
+  );
   Matter.World.add(world, body);
   return { body, pos };
 };
@@ -44,69 +45,20 @@ const createCoin = (world: Matter.World, pos: { x: number; y: number }, isGolden
   const body = Matter.Bodies.circle(pos.x, pos.y, 15, {
     isSensor: true,
     isStatic: true,  // 코인을 정적으로 변경
-    label: isGolden ? 'goldencoin' : 'coin',
+    label: isGolden ? 'gold' : 'coin',
   });
   Matter.World.add(world, body);
   return { body, pos };
 };
 
-// 렌더러 컴포넌트 정의
-const Floor: React.FC<{ body: Matter.Body; width: number }> = ({ body, width }) => {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        left: body.position.x - width / 2,
-        top: body.position.y - 10,
-        width: width,
-        height: 20,
-        backgroundColor: '#3f3f3f'
-      }}
-    />
-  );
-};
-
-const Cat: React.FC<{ body: Matter.Body }> = ({ body }) => {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        left: body.position.x - 25,
-        top: body.position.y - 25,
-        width: 50,
-        height: 50,
-        backgroundColor: '#ffd700'
-      }}
-    />
-  );
-};
-
-const Coin: React.FC<{ body: Matter.Body }> = ({ body }) => {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        left: body.position.x - 15,
-        top: body.position.y - 15,
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        backgroundColor: body.label === 'goldencoin' ? '#FFD700' : '#ffdf00',
-        borderWidth: 2,
-        borderColor: body.label === 'goldencoin' ? '#FFA500' : '#ffa500'
-      }}
-    />
-  );
-};
-
 interface EntityRenderer {
-  type: 'floor' | 'cat' | 'coin' | 'goldencoin';
+  type: 'cat' | 'coin' | 'gold';
   props: any;
 }
 
 interface Entity {
   body: Matter.Body;
-  renderer: EntityRenderer;
+  renderer: (props: any) => JSX.Element;
   pos: { x: number; y: number };
 }
 
@@ -117,7 +69,6 @@ interface PhysicsEntity {
 
 interface GameEntities {
   physics: PhysicsEntity;
-  floor: Entity;
   cat: Entity;
   [key: string]: Entity | PhysicsEntity;
 }
@@ -150,7 +101,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   const gameEngineRef = useRef<GameEngine>(null);
   const entitiesRef = useRef<GameEntities | null>(null);
   const flyingTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const goldenCoinTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const GoldTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isButtonPressedRef = useRef(false);
   const miningServiceRef = useRef<MiningService | null>(null);
   const appState = useRef(AppState.currentState);
@@ -158,7 +109,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
 
   useEffect(() => {
     setupWorld();
-    startGoldenCoinSpawner();
+    startGoldSpawner();
     initializeMiningService();
     const updateMiningStats = () => {
       if (miningServiceRef.current) {
@@ -170,7 +121,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     return () => {
       saveScore();
       if (flyingTimerRef.current) clearTimeout(flyingTimerRef.current);
-      if (goldenCoinTimerRef.current) clearTimeout(goldenCoinTimerRef.current);
+      if (GoldTimerRef.current) clearTimeout(GoldTimerRef.current);
       clearInterval(statsInterval);
     };
   }, []);
@@ -226,25 +177,25 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     }
   };
 
-  const startGoldenCoinSpawner = () => {
-    const spawnGoldenCoin = () => {
+  const startGoldSpawner = () => {
+    const spawnGold = () => {
       if (Math.random() < 0.01) { // 1% 확률
         const randomY = Math.random() * (height - 400) + 100; // 점프로 도달할 수 있는 높이
-        const goldenCoin = createCoin(entitiesRef.current!.physics.world, {
+        const goldCoin = createCoin(entitiesRef.current!.physics.world, {
           x: width + 50,
           y: randomY,
         }, true);
-        const coinId = `goldenCoin${Date.now()}`;
+        const coinId = `Gold${Date.now()}`;
         if (entitiesRef.current) {
           entitiesRef.current[coinId] = {
-            ...goldenCoin,
-            renderer: { type: 'goldencoin', props: {} }
+            ...goldCoin,
+            renderer: (props: any) => <Gold body={goldCoin.body} />
           };
         }
       }
-      goldenCoinTimerRef.current = setTimeout(spawnGoldenCoin, 1000);
+      GoldTimerRef.current = setTimeout(spawnGold, 1000);
     };
-    spawnGoldenCoin();
+    spawnGold();
   };
 
   const setupWorld = () => {
@@ -254,50 +205,71 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     engine.world.gravity.y = 0.8;
 
     // 바닥 생성
-    const floor = createFloor(world, { x: width / 2, y: height - 30 }, width);
-    const floorEntity: Entity = {
-      ...floor,
-      renderer: {
-        type: 'floor',
-        props: { width: width }
+    const floor = Matter.Bodies.rectangle(
+      width / 2,
+      height - 30,
+      width,
+      60,
+      {
+        isStatic: true,
+        label: 'floor',
+        friction: 1,
+        restitution: 0.2,
       }
-    };
+    );
+    Matter.World.add(world, floor);
 
     // 고양이 캐릭터 생성
-    const cat = createCat(world, { x: width / 4, y: height - 100 });
+    const cat = createCat(world, {
+      x: width / 4,
+      y: height - 250  // 코인과 같은 높이로 조정
+    });
     const catEntity: Entity = {
       ...cat,
-      renderer: {
-        type: 'cat',
-        props: {}
-      }
+      renderer: (props: any) => <Cat body={cat.body} />
     };
 
-    // 초기 코인 생성 - 간격과 위치 조정
+    // 초기 코인 생성 - 다양한 높이에 배치
     const initialCoins: { [key: string]: Entity } = {};
     Array(5).fill(null).forEach((_, i) => {
       const coin = createCoin(
         world,
         {
-          x: width / 2 + (i * 100),  // 간격 조정
-          y: height - 200  // 높이 조정
+          x: width / 2 + (i * 200),  // 코인 간격을 200으로 늘림
+          y: height - 250 + (Math.random() * 50)  // 점프로 먹을 수 있는 높이로 조정
         }
       );
       initialCoins[`coin${i}`] = {
         ...coin,
-        renderer: {
-          type: 'coin',
-          props: {}
-        }
+        renderer: (props: any) => <Coin body={coin.body} />
       };
     });
 
     const entities: GameEntities = {
       physics: { engine, world },
-      floor: floorEntity,
       cat: catEntity,
-      ...initialCoins
+      floor: {
+        body: floor,
+        renderer: (props: any) => (
+          <View
+            style={{
+              position: 'absolute',
+              left: width / 2 - width / 2,
+              top: height - 60,
+              width: width,
+              height: 60,
+              backgroundColor: '#2E8B57',  // 초록색 바닥
+            }}
+          />
+        ),
+        pos: { x: width / 2, y: height - 30 }
+      }
     };
+
+    // Add coins with their renderers
+    Object.entries(initialCoins).forEach(([key, coin]) => {
+      entities[key] = coin;
+    });
 
     // 충돌 이벤트 설정
     Matter.Events.on(engine, 'collisionStart', (event) => {
@@ -308,23 +280,20 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
             setScore(prevScore => prevScore + 1);
             handleCoinCollection(false);
 
-            // 새로운 코인 생성
+            // 새로운 코인 생성 - 화면 오른쪽 랜덤한 높이에 생성
             const newCoin = createCoin(world, {
               x: width + Math.random() * 100,
-              y: height - 200 - Math.random() * 200
+              y: height - 250 + (Math.random() * 50)  // 새로운 코인도 같은 높이 범위에 생성
             });
 
             if (entitiesRef.current) {
               const coinId = `coin${Date.now()}`;
               entitiesRef.current[coinId] = {
                 ...newCoin,
-                renderer: {
-                  type: 'coin',
-                  props: {}
-                }
+                renderer: (props: any) => <Coin body={newCoin.body} />
               };
             }
-          } else if (collision.bodyB.label === 'goldencoin') {
+          } else if (collision.bodyB.label === 'gold') {
             Matter.World.remove(world, collision.bodyB);
             setScore(prevScore => prevScore + 5);
             handleCoinCollection(true);
@@ -357,17 +326,24 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
         if (coin.position.x < -30) {
           Matter.Body.setPosition(coin, {
             x: width + 30,
-            y: height - 200 - Math.random() * 100
+            y: height / 4 + Math.random() * (height / 2)
           });
         }
       }
     });
 
-    // 플라잉 모드에서 고양이 상승
+    // 플라잉 모드에서 고양이 상승/하강
     if (isButtonPressedRef.current && entitiesRef.current?.cat && canFly) {
       Matter.Body.setVelocity(entitiesRef.current.cat.body, {
         x: 0,
         y: -5
+      });
+    } else if (entitiesRef.current?.cat) {
+      // 중력 효과로 천천히 하강
+      const currentVelocity = entitiesRef.current.cat.body.velocity;
+      Matter.Body.setVelocity(entitiesRef.current.cat.body, {
+        x: 0,
+        y: Math.min(currentVelocity.y + 0.2, 5)  // 최대 하강 속도 제한
       });
     }
 
@@ -399,9 +375,17 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   };
 
   const onJump = () => {
-    if (!canFly && jumpCount < 2 && entitiesRef.current?.cat) {
-      Matter.Body.setVelocity(entitiesRef.current.cat.body, { x: 0, y: -10 });
-      setJumpCount(prev => prev + 1);
+    if (entitiesRef.current?.cat) {
+      const catBody = entitiesRef.current.cat.body;
+      // 현재 속도를 확인하여 바닥에 있는지 체크
+      const isOnGround = Math.abs(catBody.velocity.y) < 0.1;
+
+      if (isOnGround) {
+        Matter.Body.setVelocity(catBody, {
+          x: catBody.velocity.x,
+          y: -20  // 점프력 증가
+        });
+      }
     }
   };
 
@@ -475,6 +459,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     if (canFly && entitiesRef.current?.cat) {
       isButtonPressedRef.current = true;
       setIsFlying(true);
+
+      const catBody = entitiesRef.current.cat.body;
+      Matter.Body.setVelocity(catBody, {
+        x: catBody.velocity.x,
+        y: -5  // 상승 속도
+      });
     }
   };
 
@@ -494,24 +484,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     return colors[Math.min(combo - 1, colors.length - 1)];
   };
 
-  // 렌더링 시스템에도 타입 가드 적용
-  const renderEntity = (entity: Entity | PhysicsEntity) => {
-    if (!isEntity(entity)) return null;
-
-    const { body, renderer } = entity;
-    switch (renderer.type) {
-      case 'floor':
-        return <Floor body={body} width={renderer.props.width} />;
-      case 'cat':
-        return <Cat body={body} />;
-      case 'coin':
-      case 'goldencoin':
-        return <Coin body={body} />;
-      default:
-        return null;
-    }
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -528,12 +500,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
         entities={setupWorld()}
         running={running}
         onEvent={(e) => {
-          if (e.type === 'step' && entitiesRef.current) {
-            Object.entries(entitiesRef.current).forEach(([key, entity]) => {
-              if (key !== 'physics') {
-                renderEntity(entity);
-              }
-            });
+          if (e.type === 'game-over') {
+            setRunning(false);
           }
         }}
       />
@@ -561,7 +529,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5FCFF',
+    backgroundColor: '#87CEEB', // 하늘색 배경
+  },
+  gameContainer: {
+    flex: 1,
+    backgroundColor: '#87CEEB',
   },
   header: {
     flexDirection: 'row',
@@ -597,10 +569,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#FFFFFF',
     textDecorationLine: 'underline',
-  },
-  gameContainer: {
-    flex: 1,
-    backgroundColor: '#87CEEB',
   },
   jumpButton: {
     position: 'absolute',

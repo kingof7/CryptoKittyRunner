@@ -33,9 +33,6 @@ mkdir -p src/components src/screens src/assets/images src/utils src/hooks src/se
 ```
 6. 이미지 파일 다운로드:
 cd CryptoKittyRunner/src/assets/images
-curl -o cat.png https://raw.githubusercontent.com/expo/expo/master/templates/expo-template-blank/assets/icon.png
-curl -o coin.png https://raw.githubusercontent.com/expo/expo/master/templates/expo-template-blank/assets/icon.png
-curl -o logo.png https://raw.githubusercontent.com/expo/expo/master/templates/expo-template-blank/assets/icon.png
 ```
 
 ```

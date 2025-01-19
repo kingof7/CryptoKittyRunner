@@ -1,35 +1,29 @@
 import Matter from 'matter-js';
 import { Image } from 'react-native';
+import React from 'react';
 
-const Cat = (world: Matter.World, pos: { x: number; y: number }) => {
-  const width = 50;
-  const height = 50;
+interface CatProps {
+  body: Matter.Body;
+}
 
-  const body = Matter.Bodies.rectangle(pos.x, pos.y, width, height, {
-    label: 'Cat',
-    friction: 1,
-    restitution: 0.2,
-  });
+const Cat: React.FC<CatProps> = ({ body }) => {
+  const width = 72;  // 추가 20% 증가 (60 * 1.2)
+  const height = 72; // 추가 20% 증가 (60 * 1.2)
 
-  Matter.World.add(world, body);
-
-  return {
-    body,
-    pos,
-    width,
-    height,
-    renderer: <Image
-      source={require('../assets/images/cat.png')}
+  return (
+    <Image
+      source={require('../assets/images/cat.jpg')}
       style={{
         position: 'absolute',
-        left: body.position.x,
-        top: body.position.y,
+        left: body.position.x - width / 2,
+        top: body.position.y - height / 2,
         width: width,
         height: height,
         resizeMode: 'contain',
+        backgroundColor: 'transparent'
       }}
-    />,
-  };
+    />
+  );
 };
 
 export default Cat;
