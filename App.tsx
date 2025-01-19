@@ -5,8 +5,9 @@ import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LoginScreen from './src/screens/LoginScreen';
 import GameScreen from './src/screens/GameScreen';
+import { RootStackParamList } from './src/types/navigation';
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -17,8 +18,8 @@ export default function App() {
 
   const checkLoginStatus = async () => {
     try {
-      const user = await AsyncStorage.getItem('user');
-      setIsLoggedIn(!!user);
+      const userToken = await AsyncStorage.getItem('userToken');
+      setIsLoggedIn(!!userToken);
     } catch (error) {
       console.error('Error checking login status:', error);
     }
@@ -27,20 +28,17 @@ export default function App() {
   return (
     <NavigationContainer>
       <StatusBar style="auto" />
-      <Stack.Navigator>
-        {!isLoggedIn ? (
-          <Stack.Screen 
-            name="Login" 
-            component={LoginScreen}
-            options={{ headerShown: false }}
-          />
-        ) : (
-          <Stack.Screen 
-            name="Game" 
-            component={GameScreen}
-            options={{ headerShown: false }}
-          />
-        )}
+      <Stack.Navigator initialRouteName={isLoggedIn ? 'Game' : 'Login'}>
+        <Stack.Screen
+          name="Login"
+          component={LoginScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Game"
+          component={GameScreen}
+          options={{ headerShown: false }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

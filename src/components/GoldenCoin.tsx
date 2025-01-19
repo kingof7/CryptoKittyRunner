@@ -1,12 +1,12 @@
 import Matter from 'matter-js';
 import { Image } from 'react-native';
 
-const Coin = (world: Matter.World, pos: { x: number; y: number }) => {
-  const width = 30;
-  const height = 30;
+const GoldenCoin = (world: Matter.World, pos: { x: number; y: number }) => {
+  const width = 40;
+  const height = 40;
 
   const body = Matter.Bodies.circle(pos.x, pos.y, width / 2, {
-    label: 'Coin',
+    label: 'GoldenCoin',
     isSensor: true,
     isStatic: true,
   });
@@ -27,9 +27,10 @@ const Coin = (world: Matter.World, pos: { x: number; y: number }) => {
         width: width,
         height: height,
         resizeMode: 'contain',
+        tintColor: '#FFD700', // 황금색으로 변경
       }}
     />,
   };
 };
 
-export default Coin;
+export default GoldenCoin;

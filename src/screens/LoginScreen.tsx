@@ -4,10 +4,11 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { makeRedirectUri } from 'expo-auth-session';
+import { LoginScreenProps } from '../types/navigation';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const LoginScreen = ({ navigation }: any) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
     clientId: '여기에_웹_클라이언트_ID를_넣으세요',
     iosClientId: '여기에_iOS_클라이언트_ID를_넣으세요',

@@ -47,7 +47,7 @@ yes | npm install --save-dev @types/matter-js
 ```
 8. 앱 실행 명령어:
 cd CryptoKittyRunner
-npx expo start
+export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@20/bin:$PATH" && npx expo start
 ```
 
 ```
@@ -76,4 +76,15 @@ Android 앱:
 웹 애플리케이션:
 승인된 리디렉션 URI: https://auth.expo.io/@your-expo-username/CryptoKittyRunner
 생성된 클라이언트 ID들을 LoginScreen.tsx의 해당 위치에 넣으면 Google 로그인이 정상적으로 작동할 것입니다.
+```
+
+```
+11. Kakao OAuth Client ID 설정
+export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@20/bin:$PATH" && cd CryptoKittyRunner && yes | npm install @react-navigation/native @react-navigation/native-stack
+
+```
+
+```
+12. 이더리움 설정
+export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@20/bin:$PATH" && cd CryptoKittyRunner && yes | npm install ethers@5.7.2 crypto-js @types/crypto-js
 ```
