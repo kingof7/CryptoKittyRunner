@@ -1,34 +1,35 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Image } from 'react-native';
-import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import auth from '@react-native-firebase/auth';
+import * as Google from 'expo-auth-session/providers/google';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { makeRedirectUri } from 'expo-auth-session';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const LoginScreen = ({ navigation }: any) => {
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: 'YOUR_WEB_CLIENT_ID',
-    iosClientId: 'YOUR_IOS_CLIENT_ID',
-    androidClientId: 'YOUR_ANDROID_CLIENT_ID',
+  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
+    clientId: '여기에_웹_클라이언트_ID를_넣으세요',
+    iosClientId: '여기에_iOS_클라이언트_ID를_넣으세요',
+    androidClientId: '여기에_Android_클라이언트_ID를_넣으세요',
+    redirectUri: makeRedirectUri({
+      scheme: 'cryptokittyrunner'
+    })
   });
 
   React.useEffect(() => {
     if (response?.type === 'success') {
-      const { authentication } = response;
-      handleGoogleLogin(authentication?.accessToken);
+      const { id_token } = response.params;
+      handleGoogleLogin(id_token);
     }
   }, [response]);
 
-  const handleGoogleLogin = async (accessToken: string | undefined) => {
-    if (!accessToken) return;
-
+  const handleGoogleLogin = async (idToken: string) => {
     try {
-      const credential = auth.GoogleAuthProvider.credential(null, accessToken);
-      const userCredential = await auth().signInWithCredential(credential);
-
-      await AsyncStorage.setItem('user', JSON.stringify(userCredential.user));
+      // Save the token
+      await AsyncStorage.setItem('userToken', idToken);
+      
+      // Navigate to game screen
       navigation.navigate('Game');
     } catch (error) {
       console.error('Google login error:', error);
@@ -54,6 +55,7 @@ const LoginScreen = ({ navigation }: any) => {
       <TouchableOpacity
         style={[styles.button, styles.googleButton]}
         onPress={() => promptAsync()}
+        disabled={!request}
       >
         <Text style={styles.buttonText}>Google로 로그인</Text>
       </TouchableOpacity>
