@@ -1,12 +1,12 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Image, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Image, Alert, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { refreshAsync, useAutoDiscovery } from 'expo-auth-session';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { makeRedirectUri } from 'expo-auth-session';
 import { LoginScreenProps } from '../types/navigation';
-import KakaoLogin from '@react-native-seoul/kakao-login';
+import KakaoLogin from '../lib/kakao-login';
 import * as ethers from 'ethers';
 import database from '@react-native-firebase/database';
 
@@ -222,12 +222,54 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     }
   };
 
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 카카오 로그인 처리
   const handleKakaoLogin = async () => {
     try {
+      console.log('카카오 로그인 시작');
+      console.log('현재 플랫폼:', Platform.OS);
+      
+      // window 객체가 있는지 확인하여 웹 환경 체크
+      const isWeb = typeof window !== 'undefined';
+      console.log('웹 환경 여부:', isWeb);
+
+      setIsLoading(true);
       const token = await KakaoLogin.login();
+      console.log('카카오 로그인 응답:', token);
+
+      // 웹에서는 KakaoLogin.login()이 리다이렉트를 처리
+      if (isWeb) {
+        console.log('웹 환경 감지');
+        // 토큰이 없다는 것은 아직 인증 코드를 받기 전이라는 의미
+        if (!token) {
+          console.log('토큰 없음 - 카카오 로그인 페이지로 리다이렉트 예정');
+          return;
+        }
+
+        console.log('토큰 있음 - 프로필 조회 시도');
+        // 토큰이 있으면 프로필 정보를 가져오고 게임 화면으로 이동
+        const profile = await KakaoLogin.getProfile();
+        console.log('카카오 프로필:', profile);
+        if (!profile || !profile.id) {
+          throw new Error('카카오 프로필 정보를 가져오지 못했습니다.');
+        }
+
+        navigation.replace('Game');
+        return;
+      }
+
+      if (!token) {
+        throw new Error('카카오 로그인 토큰을 받지 못했습니다.');
+      }
 
       // 카카오 사용자 정보 가져오기
       const profile = await KakaoLogin.getProfile();
+      console.log('카카오 프로필:', profile);
+      if (!profile || !profile.id) {
+        throw new Error('카카오 프로필 정보를 가져오지 못했습니다.');
+      }
+
       const userId = profile.id.toString();
 
       // 토큰 저장
@@ -238,73 +280,42 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
         [STORAGE_KEYS.USER_ID, userId]
       ]);
 
-      // Firebase에 토큰 정보 저장
-      await saveUserDataToFirebase(userId, {
-        kakaoAccessToken: token.accessToken,
-        kakaoRefreshToken: token.refreshToken,
-        kakaoProfile: profile,
-        lastLogin: database.ServerValue.TIMESTAMP
-      });
-
       console.log('카카오 로그인 성공:', {
         액세스토큰: token.accessToken.substring(0, 10) + '...',
         리프레시토큰: token.refreshToken.substring(0, 10) + '...',
         사용자ID: userId
       });
 
-      // 지갑 초기화 (Firebase 연동)
-      const wallet = await initializeWallet(userId);
-      if (!wallet) return;
-
-      navigation.navigate('Game');
+      navigation.replace('Game');
     } catch (error) {
       console.error('Kakao login error:', error);
-      Alert.alert('로그인 실패', '카카오 로그인에 실패했습니다.');
+      Alert.alert(
+        '로그인 실패',
+        error instanceof Error ? error.message : '카카오 로그인에 실패했습니다.'
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
   // 카카오 토큰 갱신 함수
   const refreshKakaoToken = async () => {
     try {
-      const result = await KakaoLogin.getAccessToken();
-      if (!result) {
-        throw new Error('토큰 갱신 실패: 액세스 토큰을 가져올 수 없습니다.');
+      const token = await KakaoLogin.refreshAccessToken();
+      if (!token) {
+        throw new Error('토큰 갱신 실패');
       }
 
-      // 새로운 액세스 토큰 저장
+      // 토큰 저장
       await AsyncStorage.multiSet([
-        [STORAGE_KEYS.KAKAO_ACCESS_TOKEN, result.accessToken],
-        [STORAGE_KEYS.USER_TOKEN, result.accessToken]
+        [STORAGE_KEYS.KAKAO_ACCESS_TOKEN, token.accessToken],
+        [STORAGE_KEYS.KAKAO_REFRESH_TOKEN, token.refreshToken],
+        [STORAGE_KEYS.USER_TOKEN, token.accessToken]
       ]);
 
-      // Firebase에 새로운 액세스 토큰 저장
-      const userId = await AsyncStorage.getItem(STORAGE_KEYS.USER_ID);
-      if (userId) {
-        await saveUserDataToFirebase(userId, {
-          kakaoAccessToken: result.accessToken,
-          lastUpdated: database.ServerValue.TIMESTAMP
-        });
-      }
-
-      console.log('카카오 토큰 갱신 성공:', {
-        새액세스토큰: result.accessToken.substring(0, 10) + '...',
-        만료시간: new Date(Number(result.expiresIn) * 1000 + Date.now()).toLocaleString()
-      });
-
-      return result.accessToken;
+      return token.accessToken;
     } catch (error) {
-      console.error('토큰 갱신 실패:', error);
-      // 토큰 갱신 실패 시 재로그인 필요
-      Alert.alert(
-        '로그인 필요',
-        '로그인이 만료되었습니다. 다시 로그인해주세요.',
-        [
-          {
-            text: '확인',
-            onPress: () => navigation.replace('Login')
-          }
-        ]
-      );
+      console.error('카카오 토큰 갱신 실패:', error);
       throw error;
     }
   };
@@ -325,6 +336,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       <TouchableOpacity
         style={[styles.button, styles.kakaoButton]}
         onPress={handleKakaoLogin}
+        disabled={isLoading}
       >
         <Text style={styles.buttonText}>카카오로 로그인</Text>
       </TouchableOpacity>
