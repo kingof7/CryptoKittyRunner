@@ -12,8 +12,6 @@ import {
 } from 'react-native';
 import { GameEngine } from 'react-native-game-engine';
 import Matter from 'matter-js';
-import database from '@react-native-firebase/database';
-import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameScreenProps } from '../types/navigation';
 import { MiningService } from '../services/MiningService';
@@ -26,7 +24,7 @@ const { width, height } = Dimensions.get('window');
 const createFloor = (world: Matter.World, pos: { x: number; y: number }, width: number) => {
   const body = Matter.Bodies.rectangle(pos.x, pos.y, width, 20, {
     isStatic: true,
-    label: 'Floor',
+    label: 'floor',
   });
   Matter.World.add(world, body);
   return { body, pos, width };
@@ -34,7 +32,7 @@ const createFloor = (world: Matter.World, pos: { x: number; y: number }, width: 
 
 const createCat = (world: Matter.World, pos: { x: number; y: number }) => {
   const body = Matter.Bodies.rectangle(pos.x, pos.y, 50, 50, {
-    label: 'Cat',
+    label: 'cat',
     friction: 1,
     restitution: 0.2,
   });
@@ -45,15 +43,15 @@ const createCat = (world: Matter.World, pos: { x: number; y: number }) => {
 const createCoin = (world: Matter.World, pos: { x: number; y: number }, isGolden: boolean = false) => {
   const body = Matter.Bodies.circle(pos.x, pos.y, 15, {
     isSensor: true,
-    isStatic: false,
-    label: isGolden ? 'GoldenCoin' : 'Coin',
+    isStatic: true,  // 코인을 정적으로 변경
+    label: isGolden ? 'goldencoin' : 'coin',
   });
   Matter.World.add(world, body);
   return { body, pos };
 };
 
 // 렌더러 컴포넌트 정의
-const FloorRenderer: React.FC<{ body: Matter.Body; width: number }> = ({ body, width }) => {
+const Floor: React.FC<{ body: Matter.Body; width: number }> = ({ body, width }) => {
   return (
     <View
       style={{
@@ -68,7 +66,7 @@ const FloorRenderer: React.FC<{ body: Matter.Body; width: number }> = ({ body, w
   );
 };
 
-const CatRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
+const Cat: React.FC<{ body: Matter.Body }> = ({ body }) => {
   return (
     <View
       style={{
@@ -83,7 +81,7 @@ const CatRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
   );
 };
 
-const CoinRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
+const Coin: React.FC<{ body: Matter.Body }> = ({ body }) => {
   return (
     <View
       style={{
@@ -93,14 +91,16 @@ const CoinRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
         width: 30,
         height: 30,
         borderRadius: 15,
-        backgroundColor: '#ffdf00'
+        backgroundColor: body.label === 'goldencoin' ? '#FFD700' : '#ffdf00',
+        borderWidth: 2,
+        borderColor: body.label === 'goldencoin' ? '#FFA500' : '#ffa500'
       }}
     />
   );
 };
 
 interface EntityRenderer {
-  type: 'floor' | 'cat' | 'coin' | 'goldenCoin';
+  type: 'floor' | 'cat' | 'coin' | 'goldencoin';
   props: any;
 }
 
@@ -121,6 +121,15 @@ interface GameEntities {
   cat: Entity;
   [key: string]: Entity | PhysicsEntity;
 }
+
+// Entity 타입 가드 함수 추가
+const isEntity = (entity: Entity | PhysicsEntity): entity is Entity => {
+  return 'body' in entity && 'renderer' in entity;
+};
+
+const isPhysicsEntity = (entity: Entity | PhysicsEntity): entity is PhysicsEntity => {
+  return 'engine' in entity && 'world' in entity;
+};
 
 const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   const [engine, setEngine] = useState<GameEngine | null>(null);
@@ -229,7 +238,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
         if (entitiesRef.current) {
           entitiesRef.current[coinId] = {
             ...goldenCoin,
-            renderer: { type: 'goldenCoin', props: {} }
+            renderer: { type: 'goldencoin', props: {} }
           };
         }
       }
@@ -242,7 +251,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     const engine = Matter.Engine.create({ enableSleeping: false });
     const world = engine.world;
 
-    // 중력 설정
     engine.world.gravity.y = 0.8;
 
     // 바닥 생성
@@ -265,10 +273,16 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       }
     };
 
-    // 초기 코인 생성
+    // 초기 코인 생성 - 간격과 위치 조정
     const initialCoins: { [key: string]: Entity } = {};
     Array(5).fill(null).forEach((_, i) => {
-      const coin = createCoin(world, { x: width + (i * 150), y: height - 200 });
+      const coin = createCoin(
+        world,
+        {
+          x: width / 2 + (i * 100),  // 간격 조정
+          y: height - 200  // 높이 조정
+        }
+      );
       initialCoins[`coin${i}`] = {
         ...coin,
         renderer: {
@@ -278,7 +292,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       };
     });
 
-    // 엔티티 설정
     const entities: GameEntities = {
       physics: { engine, world },
       floor: floorEntity,
@@ -289,19 +302,21 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     // 충돌 이벤트 설정
     Matter.Events.on(engine, 'collisionStart', (event) => {
       event.pairs.forEach((collision) => {
-        if (collision.bodyA.label === 'Cat') {
-          if (collision.bodyB.label === 'Coin') {
+        if (collision.bodyA.label === 'cat') {
+          if (collision.bodyB.label === 'coin') {
             Matter.World.remove(world, collision.bodyB);
             setScore(prevScore => prevScore + 1);
             handleCoinCollection(false);
 
-            // 새로운 코인 추가
+            // 새로운 코인 생성
             const newCoin = createCoin(world, {
               x: width + Math.random() * 100,
               y: height - 200 - Math.random() * 200
             });
+
             if (entitiesRef.current) {
-              entitiesRef.current[`coin${Date.now()}`] = {
+              const coinId = `coin${Date.now()}`;
+              entitiesRef.current[coinId] = {
                 ...newCoin,
                 renderer: {
                   type: 'coin',
@@ -309,7 +324,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
                 }
               };
             }
-          } else if (collision.bodyB.label === 'GoldenCoin') {
+          } else if (collision.bodyB.label === 'goldencoin') {
             Matter.World.remove(world, collision.bodyB);
             setScore(prevScore => prevScore + 5);
             handleCoinCollection(true);
@@ -325,42 +340,59 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   const gameLoop = (entities: GameEntities) => {
     if (!running) return entities;
     const engine = entities.physics.engine;
+    const world = entities.physics.world;
 
     Matter.Engine.update(engine, 16.666);
 
-    // 코인 이동
+    // 코인 이동 및 재활용
     Object.entries(entities).forEach(([key, entity]) => {
-      if (key !== 'physics' && 'body' in entity) {
-        if (key.includes('coin')) {
-          Matter.Body.setPosition(entity.body, {
-            x: entity.body.position.x - 2,
-            y: entity.body.position.y
-          });
+      if (key.startsWith('coin') && isEntity(entity)) {
+        const coin = entity.body;
+        Matter.Body.setPosition(coin, {
+          x: coin.position.x - 2,
+          y: coin.position.y
+        });
 
-          // 화면 밖으로 나간 코인 제거
-          if (entity.body.position.x < -50) {
-            Matter.World.remove(engine.world, entity.body);
-            delete entities[key];
-          }
+        // 화면 밖으로 나간 코인 재활용
+        if (coin.position.x < -30) {
+          Matter.Body.setPosition(coin, {
+            x: width + 30,
+            y: height - 200 - Math.random() * 100
+          });
         }
       }
     });
+
+    // 플라잉 모드에서 고양이 상승
+    if (isButtonPressedRef.current && entitiesRef.current?.cat && canFly) {
+      Matter.Body.setVelocity(entitiesRef.current.cat.body, {
+        x: 0,
+        y: -5
+      });
+    }
+
+    return entities;
+  };
+
+  const updateGame = (entities: GameEntities) => {
+    const engine = entities.physics.engine;
+    Matter.Engine.update(engine, 16);
 
     return entities;
   };
 
   const saveScore = async () => {
     try {
-      const user = auth().currentUser;
-      if (user) {
-        const currentScore = await AsyncStorage.getItem('score') || '0';
-        const newScore = parseInt(currentScore) + score;
-        await AsyncStorage.setItem('score', newScore.toString());
-
-        await database()
-          .ref(`users/${user.uid}/score`)
-          .set(newScore);
-      }
+      // Firebase 임시 비활성화
+      // const user = auth().currentUser;
+      // if (user) {
+      const currentScore = await AsyncStorage.getItem('score') || '0';
+      const newScore = parseInt(currentScore) + score;
+      await AsyncStorage.setItem('score', newScore.toString());
+      // await database()
+      //   .ref(`users/${user.uid}/score`)
+      //   .set(newScore);
+      // }
     } catch (error) {
       console.error('Error saving score:', error);
     }
@@ -409,7 +441,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       ]);
 
       // 파이어베이스 로그아웃
-      await auth().signOut();
+      // await auth().signOut();
 
       // 게임 상태 초기화
       setRunning(false);
@@ -462,19 +494,19 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     return colors[Math.min(combo - 1, colors.length - 1)];
   };
 
-  // 렌더링 시스템
+  // 렌더링 시스템에도 타입 가드 적용
   const renderEntity = (entity: Entity | PhysicsEntity) => {
-    if ('engine' in entity) return null;
+    if (!isEntity(entity)) return null;
 
     const { body, renderer } = entity;
     switch (renderer.type) {
       case 'floor':
-        return <FloorRenderer body={body} {...renderer.props} />;
+        return <Floor body={body} width={renderer.props.width} />;
       case 'cat':
-        return <CatRenderer body={body} {...renderer.props} />;
+        return <Cat body={body} />;
       case 'coin':
-      case 'goldenCoin':
-        return <CoinRenderer body={body} {...renderer.props} />;
+      case 'goldencoin':
+        return <Coin body={body} />;
       default:
         return null;
     }
@@ -492,7 +524,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       <GameEngine
         ref={gameEngineRef}
         style={styles.gameContainer}
-        systems={[gameLoop]}
+        systems={[updateGame, gameLoop]}
         entities={setupWorld()}
         running={running}
         onEvent={(e) => {
