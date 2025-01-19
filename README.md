@@ -82,6 +82,8 @@ Android 앱:
 11. Kakao OAuth Client ID 설정
 export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@20/bin:$PATH" && cd CryptoKittyRunner && yes | npm install @react-navigation/native @react-navigation/native-stack
 
+export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@20/bin:$PATH" && cd CryptoKittyRunner && yes | npm install @react-native-seoul/kakao-login matter-js @types/matter-js react-native-game-engine
+
 ```
 
 ```
@@ -128,11 +130,11 @@ Sepolia 테스트넷에서 개발을 시작하기 위한 단계:
   3. 메인넷용 Infura Project ID 설정
 
 - 스마트 컨트랙트 재배포
-  ```bash
-  npx hardhat run scripts/deploy.ts --network mainnet
+  ```npx hardhat run scripts/deploy.ts --network mainnet
   ```
-  * 주의: 실제 ETH 필요 (가스비 + 컨트랙트 배포비용)
-  * 가스비는 네트워크 상황에 따라 크게 변동될 수 있음
+
+*** 주의: 실제 ETH 필요 (가스비 + 컨트랙트 배포비용)***
+*** 가스비는 네트워크 상황에 따라 크게 변동될 수 있음***
 
 - 메인넷 전환 전 체크리스트
   1. 스마트 컨트랙트 감사 (Audit)

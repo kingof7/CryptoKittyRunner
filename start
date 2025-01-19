@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# Homebrew와 Node.js PATH 설정
+export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@20/bin:$PATH"
+
+# Node.js로 start.js 실행
+node "$(dirname "$0")/start.js"

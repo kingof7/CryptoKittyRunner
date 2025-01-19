@@ -1,11 +1,17 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, View, Dimensions, TouchableOpacity, Text, Pressable, Alert } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  StyleSheet,
+  View,
+  Dimensions,
+  TouchableOpacity,
+  Text,
+  Pressable,
+  Alert,
+  AppState,
+  AppStateStatus
+} from 'react-native';
 import { GameEngine } from 'react-native-game-engine';
 import Matter from 'matter-js';
-import Cat from '../components/Cat';
-import Coin from '../components/Coin';
-import GoldenCoin from '../components/GoldenCoin';
-import Floor from '../components/Floor';
 import database from '@react-native-firebase/database';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -16,14 +22,104 @@ import * as ethers from 'ethers';
 
 const { width, height } = Dimensions.get('window');
 
+// 물리 엔진 객체 생성 함수들
+const createFloor = (world: Matter.World, pos: { x: number; y: number }, width: number) => {
+  const body = Matter.Bodies.rectangle(pos.x, pos.y, width, 20, {
+    isStatic: true,
+    label: 'Floor',
+  });
+  Matter.World.add(world, body);
+  return { body, pos, width };
+};
+
+const createCat = (world: Matter.World, pos: { x: number; y: number }) => {
+  const body = Matter.Bodies.rectangle(pos.x, pos.y, 50, 50, {
+    label: 'Cat',
+    friction: 1,
+    restitution: 0.2,
+  });
+  Matter.World.add(world, body);
+  return { body, pos };
+};
+
+const createCoin = (world: Matter.World, pos: { x: number; y: number }, isGolden: boolean = false) => {
+  const body = Matter.Bodies.circle(pos.x, pos.y, 15, {
+    isSensor: true,
+    isStatic: false,
+    label: isGolden ? 'GoldenCoin' : 'Coin',
+  });
+  Matter.World.add(world, body);
+  return { body, pos };
+};
+
+// 렌더러 컴포넌트 정의
+const FloorRenderer: React.FC<{ body: Matter.Body; width: number }> = ({ body, width }) => {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: body.position.x - width / 2,
+        top: body.position.y - 10,
+        width: width,
+        height: 20,
+        backgroundColor: '#3f3f3f'
+      }}
+    />
+  );
+};
+
+const CatRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: body.position.x - 25,
+        top: body.position.y - 25,
+        width: 50,
+        height: 50,
+        backgroundColor: '#ffd700'
+      }}
+    />
+  );
+};
+
+const CoinRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: body.position.x - 15,
+        top: body.position.y - 15,
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: '#ffdf00'
+      }}
+    />
+  );
+};
+
+interface EntityRenderer {
+  type: 'floor' | 'cat' | 'coin' | 'goldenCoin';
+  props: any;
+}
+
+interface Entity {
+  body: Matter.Body;
+  renderer: EntityRenderer;
+  pos: { x: number; y: number };
+}
+
+interface PhysicsEntity {
+  engine: Matter.Engine;
+  world: Matter.World;
+}
+
 interface GameEntities {
-  physics: {
-    engine: Matter.Engine;
-    world: Matter.World;
-  };
-  cat: ReturnType<typeof Cat>;
-  floor: ReturnType<typeof Floor>;
-  [key: string]: any;
+  physics: PhysicsEntity;
+  floor: Entity;
+  cat: Entity;
+  [key: string]: Entity | PhysicsEntity;
 }
 
 const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
@@ -48,6 +144,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   const goldenCoinTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isButtonPressedRef = useRef(false);
   const miningServiceRef = useRef<MiningService | null>(null);
+  const appState = useRef(AppState.currentState);
+  const backgroundTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     setupWorld();
@@ -65,6 +163,17 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       if (flyingTimerRef.current) clearTimeout(flyingTimerRef.current);
       if (goldenCoinTimerRef.current) clearTimeout(goldenCoinTimerRef.current);
       clearInterval(statsInterval);
+    };
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+      if (backgroundTimer.current) {
+        clearTimeout(backgroundTimer.current);
+      }
     };
   }, []);
 
@@ -112,13 +221,16 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     const spawnGoldenCoin = () => {
       if (Math.random() < 0.01) { // 1% 확률
         const randomY = Math.random() * (height - 400) + 100; // 점프로 도달할 수 있는 높이
-        const goldenCoin = GoldenCoin(entitiesRef.current!.physics.world, {
+        const goldenCoin = createCoin(entitiesRef.current!.physics.world, {
           x: width + 50,
           y: randomY,
-        });
+        }, true);
         const coinId = `goldenCoin${Date.now()}`;
         if (entitiesRef.current) {
-          entitiesRef.current[coinId] = goldenCoin;
+          entitiesRef.current[coinId] = {
+            ...goldenCoin,
+            renderer: { type: 'goldenCoin', props: {} }
+          };
         }
       }
       goldenCoinTimerRef.current = setTimeout(spawnGoldenCoin, 1000);
@@ -130,17 +242,51 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     const engine = Matter.Engine.create({ enableSleeping: false });
     const world = engine.world;
 
-    // Create floor
-    const floor = Floor(world, { x: width / 2, y: height - 30 }, width);
+    // 중력 설정
+    engine.world.gravity.y = 0.8;
 
-    // Create cat
-    const cat = Cat(world, { x: width / 4, y: height - 100 });
+    // 바닥 생성
+    const floor = createFloor(world, { x: width / 2, y: height - 30 }, width);
+    const floorEntity: Entity = {
+      ...floor,
+      renderer: {
+        type: 'floor',
+        props: { width: width }
+      }
+    };
 
-    // Create initial coins
-    const coins = Array(5).fill(null).map((_, i) => {
-      return Coin(world, { x: width + (i * 150), y: height - 200 });
+    // 고양이 캐릭터 생성
+    const cat = createCat(world, { x: width / 4, y: height - 100 });
+    const catEntity: Entity = {
+      ...cat,
+      renderer: {
+        type: 'cat',
+        props: {}
+      }
+    };
+
+    // 초기 코인 생성
+    const initialCoins: { [key: string]: Entity } = {};
+    Array(5).fill(null).forEach((_, i) => {
+      const coin = createCoin(world, { x: width + (i * 150), y: height - 200 });
+      initialCoins[`coin${i}`] = {
+        ...coin,
+        renderer: {
+          type: 'coin',
+          props: {}
+        }
+      };
     });
 
+    // 엔티티 설정
+    const entities: GameEntities = {
+      physics: { engine, world },
+      floor: floorEntity,
+      cat: catEntity,
+      ...initialCoins
+    };
+
+    // 충돌 이벤트 설정
     Matter.Events.on(engine, 'collisionStart', (event) => {
       event.pairs.forEach((collision) => {
         if (collision.bodyA.label === 'Cat') {
@@ -148,35 +294,58 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
             Matter.World.remove(world, collision.bodyB);
             setScore(prevScore => prevScore + 1);
             handleCoinCollection(false);
-            // Add new coin
-            const lastCoin = coins[coins.length - 1];
-            coins.push(Coin(world, { x: lastCoin.pos.x + 150, y: height - 200 }));
+
+            // 새로운 코인 추가
+            const newCoin = createCoin(world, {
+              x: width + Math.random() * 100,
+              y: height - 200 - Math.random() * 200
+            });
+            if (entitiesRef.current) {
+              entitiesRef.current[`coin${Date.now()}`] = {
+                ...newCoin,
+                renderer: {
+                  type: 'coin',
+                  props: {}
+                }
+              };
+            }
           } else if (collision.bodyB.label === 'GoldenCoin') {
             Matter.World.remove(world, collision.bodyB);
+            setScore(prevScore => prevScore + 5);
             handleCoinCollection(true);
-            setCanFly(true);
-            setFlyingTimeLeft(15);
-            if (flyingTimerRef.current) clearTimeout(flyingTimerRef.current);
-            flyingTimerRef.current = setTimeout(() => {
-              setCanFly(false);
-              setIsFlying(false);
-            }, 15000);
-          } else if (collision.bodyB.label === 'Floor') {
-            setJumpCount(0);
-            setCombo(0); // Reset combo when touching the floor
           }
         }
       });
     });
 
-    const entities: GameEntities = {
-      physics: { engine, world },
-      floor: floor,
-      cat: cat,
-      ...coins.reduce((acc, coin, i) => ({ ...acc, [`coin${i}`]: coin }), {}),
-    };
-
     entitiesRef.current = entities;
+    return entities;
+  };
+
+  const gameLoop = (entities: GameEntities) => {
+    if (!running) return entities;
+    const engine = entities.physics.engine;
+
+    Matter.Engine.update(engine, 16.666);
+
+    // 코인 이동
+    Object.entries(entities).forEach(([key, entity]) => {
+      if (key !== 'physics' && 'body' in entity) {
+        if (key.includes('coin')) {
+          Matter.Body.setPosition(entity.body, {
+            x: entity.body.position.x - 2,
+            y: entity.body.position.y
+          });
+
+          // 화면 밖으로 나간 코인 제거
+          if (entity.body.position.x < -50) {
+            Matter.World.remove(engine.world, entity.body);
+            delete entities[key];
+          }
+        }
+      }
+    });
+
     return entities;
   };
 
@@ -204,12 +373,69 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     }
   };
 
-  const handleLogout = async () => {
+  const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+    if (appState.current === 'active' && nextAppState.match(/inactive|background/)) {
+      // 앱이 백그라운드로 전환될 때
+      console.log('앱이 백그라운드로 전환됩니다.');
+
+      // 30초 타이머 시작
+      backgroundTimer.current = setTimeout(() => {
+        handleForceLogout();
+      }, 30000); // 30초
+    } else if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+      // 앱이 포그라운드로 돌아올 때
+      console.log('앱이 포그라운드로 돌아왔습니다.');
+
+      // 타이머 취소
+      if (backgroundTimer.current) {
+        clearTimeout(backgroundTimer.current);
+        backgroundTimer.current = null;
+      }
+    }
+    appState.current = nextAppState;
+  };
+
+  const handleForceLogout = async () => {
     try {
-      await AsyncStorage.removeItem('userToken');
+      // 게임 상태 저장
+      await saveScore();
+
+      // 로그인 토큰 삭제
+      await AsyncStorage.multiRemove([
+        'userToken',
+        'kakaoAccessToken',
+        'kakaoRefreshToken',
+        'googleToken'
+      ]);
+
+      // 파이어베이스 로그아웃
+      await auth().signOut();
+
+      // 게임 상태 초기화
+      setRunning(false);
+      setScore(0);
+      setEthMined(0);
+      setCombo(0);
+
+      // 로그인 화면으로 이동
       navigation.replace('Login');
     } catch (error) {
-      console.error('Error logging out:', error);
+      console.error('Force logout error:', error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      // 타이머가 있다면 취소
+      if (backgroundTimer.current) {
+        clearTimeout(backgroundTimer.current);
+        backgroundTimer.current = null;
+      }
+
+      await handleForceLogout();
+    } catch (error) {
+      console.error('Logout error:', error);
+      Alert.alert('로그아웃 실패', '로그아웃 중 오류가 발생했습니다.');
     }
   };
 
@@ -225,67 +451,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     setIsFlying(false);
   };
 
-  const Physics = (entities: GameEntities, { time }: { time: { delta: number } }) => {
-    const engine = entities.physics.engine;
-    Matter.Engine.update(engine, time.delta);
-
-    // Move coins to the left
-    Object.keys(entities).forEach(key => {
-      if (key.startsWith('coin') || key.startsWith('goldenCoin')) {
-        const coin = entities[key];
-        Matter.Body.translate(coin.body, { x: -2, y: 0 });
-
-        // If coin goes off screen, remove it and add new one
-        if (coin.body.position.x < -50) {
-          Matter.World.remove(entities.physics.world, coin.body);
-          delete entities[key];
-
-          if (key.startsWith('coin')) {
-            // Add new regular coin
-            const newCoin = Coin(entities.physics.world, {
-              x: width + 150,
-              y: height - 200 - Math.random() * 200
-            });
-            entities[`coin${Date.now()}`] = newCoin;
-          }
-        }
-      }
-    });
-
-    // Apply gravity or flying physics to cat
-    const cat = entities.cat;
-    if (canFly && isButtonPressedRef.current) {
-      // Flying physics
-      const upwardForce = -0.5 - (time.delta * 0.001); // 가속도 적용
-      Matter.Body.translate(cat.body, { x: 0, y: upwardForce });
-    } else if (!canFly && cat.body.position.y < height - 100) {
-      // Normal gravity
-      Matter.Body.translate(cat.body, { x: 0, y: 0.5 });
-    } else if (canFly && !isButtonPressedRef.current && cat.body.position.y < height - 100) {
-      // Slow descent when flying but not pressing
-      Matter.Body.translate(cat.body, { x: 0, y: 0.2 });
-    }
-
-    // Update renderers
-    Object.keys(entities).forEach(key => {
-      if (entities[key].body) {
-        const { body, renderer } = entities[key];
-        if (renderer) {
-          const updatedRenderer = React.cloneElement(renderer, {
-            style: {
-              ...renderer.props.style,
-              left: body.position.x - (renderer.props.style.width / 2),
-              top: body.position.y - (renderer.props.style.height / 2),
-            },
-          });
-          entities[key].renderer = updatedRenderer;
-        }
-      }
-    });
-
-    return entities;
-  };
-
   const getComboColor = (combo: number): string => {
     const colors = [
       '#FFFFFF',   // 1x
@@ -297,33 +462,48 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     return colors[Math.min(combo - 1, colors.length - 1)];
   };
 
+  // 렌더링 시스템
+  const renderEntity = (entity: Entity | PhysicsEntity) => {
+    if ('engine' in entity) return null;
+
+    const { body, renderer } = entity;
+    switch (renderer.type) {
+      case 'floor':
+        return <FloorRenderer body={body} {...renderer.props} />;
+      case 'cat':
+        return <CatRenderer body={body} {...renderer.props} />;
+      case 'coin':
+      case 'goldenCoin':
+        return <CoinRenderer body={body} {...renderer.props} />;
+      default:
+        return null;
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.scoreText}>Score: {score}</Text>
-          <Text style={styles.ethText}>
-            ETH Mined: {miningStats.totalMined.toFixed(6)}
-          </Text>
-          {miningStats.combo > 0 && (
-            <Text style={[styles.comboText, { color: getComboColor(miningStats.combo) }]}>
-              Combo: {miningStats.combo}x
-            </Text>
-          )}
-        </View>
-        {canFly && (
-          <Text style={styles.flyingText}>Flying: {flyingTimeLeft}s</Text>
-        )}
-        <TouchableOpacity onPress={handleLogout}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+        <Text style={styles.scoreText}>Score: {score}</Text>
+        <Text style={styles.ethText}>ETH: {ethMined.toFixed(6)}</Text>
+        <Text style={[styles.comboText, { color: getComboColor(combo) }]}>
+          Combo: {combo}x
+        </Text>
       </View>
       <GameEngine
         ref={gameEngineRef}
         style={styles.gameContainer}
-        systems={[Physics]}
+        systems={[gameLoop]}
         entities={setupWorld()}
         running={running}
+        onEvent={(e) => {
+          if (e.type === 'step' && entitiesRef.current) {
+            Object.entries(entitiesRef.current).forEach(([key, entity]) => {
+              if (key !== 'physics') {
+                renderEntity(entity);
+              }
+            });
+          }
+        }}
       />
       {canFly ? (
         <Pressable

@@ -31,13 +31,13 @@ export const WalletScreen: React.FC = () => {
         setWalletAddress(wallet.address);
         const service = new RewardService(privateKey);
         setRewardService(service);
-        
+
         // 초기 데이터 로드
         const [rewards, minAmount] = await Promise.all([
           service.getPendingRewards(wallet.address),
           service.getMinWithdrawAmount()
         ]);
-        
+
         setPendingRewards(rewards);
         setMinWithdrawAmount(minAmount);
       } else {
@@ -57,7 +57,7 @@ export const WalletScreen: React.FC = () => {
     try {
       setWithdrawing(true);
       const success = await rewardService.withdrawRewards();
-      
+
       if (success) {
         Alert.alert('Success', 'Rewards withdrawn to your wallet!');
         setPendingRewards(0);
@@ -85,12 +85,12 @@ export const WalletScreen: React.FC = () => {
       <View style={styles.card}>
         <Text style={styles.title}>Your Wallet</Text>
         <Text style={styles.address}>{walletAddress}</Text>
-        
+
         <View style={styles.rewardsContainer}>
           <Text style={styles.label}>Pending Rewards:</Text>
           <Text style={styles.value}>{pendingRewards.toFixed(6)} ETH</Text>
         </View>
-        
+
         <View style={styles.minAmountContainer}>
           <Text style={styles.label}>Minimum Withdrawal:</Text>
           <Text style={styles.value}>{minWithdrawAmount} ETH</Text>
