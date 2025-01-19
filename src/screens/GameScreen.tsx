@@ -8,7 +8,8 @@ import {
   Pressable,
   Alert,
   AppState,
-  AppStateStatus
+  AppStateStatus,
+  StatusBar
 } from 'react-native';
 import { GameEngine } from 'react-native-game-engine';
 import Matter from 'matter-js';
@@ -51,41 +52,35 @@ const createCoin = (world: Matter.World, pos: { x: number; y: number }, isGolden
   return { body, pos };
 };
 
-interface EntityRenderer {
-  type: 'cat' | 'coin' | 'gold';
-  props: any;
-}
-
-interface Entity {
-  body: Matter.Body;
-  renderer: (props: any) => JSX.Element;
-  pos: { x: number; y: number };
-}
-
+// 엔티티 타입 정의
 interface PhysicsEntity {
   engine: Matter.Engine;
   world: Matter.World;
 }
 
-interface GameEntities {
-  physics: PhysicsEntity;
-  cat: Entity;
-  [key: string]: Entity | PhysicsEntity;
+interface GameEntity {
+  body: Matter.Body;
+  renderer: (props: any) => React.ReactNode;
+  pos?: { x: number; y: number };
 }
 
-// Entity 타입 가드 함수 추가
-const isEntity = (entity: Entity | PhysicsEntity): entity is Entity => {
-  return 'body' in entity && 'renderer' in entity;
-};
+interface GameEntities {
+  physics: PhysicsEntity;
+  cat?: GameEntity;
+  floor?: GameEntity;
+  [key: string]: PhysicsEntity | GameEntity | undefined;
+}
 
-const isPhysicsEntity = (entity: Entity | PhysicsEntity): entity is PhysicsEntity => {
-  return 'engine' in entity && 'world' in entity;
+// 타입 가드 함수
+const isGameEntity = (entity: any): entity is GameEntity => {
+  return entity && 'body' in entity;
 };
 
 const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [running, setRunning] = useState(true);
   const [score, setScore] = useState(0);
+  const [ethPoints, setEthPoints] = useState(0);
   const [isFlying, setIsFlying] = useState(false);
   const [canFly, setCanFly] = useState(false);
   const [jumpCount, setJumpCount] = useState(0);
@@ -106,6 +101,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   const miningServiceRef = useRef<MiningService | null>(null);
   const appState = useRef(AppState.currentState);
   const backgroundTimer = useRef<NodeJS.Timeout | null>(null);
+  const collisionRef = useRef<{ [key: string]: boolean }>({});
 
   useEffect(() => {
     setupWorld();
@@ -154,26 +150,61 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     }
   };
 
-  const handleCoinCollection = async (isGolden: boolean) => {
-    if (!miningServiceRef.current) return;
+  const handleCoinCollection = async (isGold: boolean) => {
+    // 일반 코인은 0.001 ETH, 골드 코인은 0.005 ETH
+    const ethValue = isGold ? 0.005 : 0.001;
+    setEthPoints(prev => prev + ethValue);
+
+    // 코인 획득 효과음 재생 또는 시각적 효과 추가 가능
+  };
+
+  const handleCoinCollision = (coinBody: Matter.Body, isGold: boolean) => {
+    const coinId = coinBody.id.toString();
+
+    // 이미 처리된 충돌인지 확인
+    if (collisionRef.current[coinId]) {
+      return;
+    }
+
+    // 충돌 처리 표시
+    collisionRef.current[coinId] = true;
 
     try {
-      const result = await miningServiceRef.current.mineCoin(isGolden);
-      if (result.success && result.reward) {
-        setMiningStats(miningServiceRef.current.getStats());
+      if (!entitiesRef.current) return;
 
-        // Show mining success message with animation
-        Alert.alert(
-          'Mining Success! 🎉',
-          `Mined ${result.reward.toFixed(6)} ETH\n` +
-          `Combo: ${miningStats.combo + 1}x\n` +
-          `Total Mined: ${(miningStats.totalMined + result.reward).toFixed(6)} ETH`,
-          [{ text: 'OK' }],
-          { cancelable: true }
-        );
-      }
+      // 코인 제거
+      Matter.World.remove(entitiesRef.current.physics.world, coinBody);
+
+      // ETH 포인트 증가
+      handleCoinCollection(isGold);
+
+      // 새로운 코인 생성
+      const newCoin = createCoin(entitiesRef.current.physics.world, {
+        x: width + Math.random() * 100,
+        y: height / 3 - Math.random() * 50
+      }, isGold);
+
+      // 이전 코인 엔티티 제거
+      const coinEntities = { ...entitiesRef.current };
+      Object.entries(coinEntities).forEach(([key, entity]) => {
+        if (isGameEntity(entity) && entity.body === coinBody) {
+          delete entitiesRef.current![key];
+        }
+      });
+
+      // 새 코인 엔티티 추가
+      const newCoinId = `coin${Date.now()}`;
+      entitiesRef.current[newCoinId] = {
+        body: newCoin.body,
+        renderer: (props: any) => isGold ? <Gold body={newCoin.body} /> : <Coin body={newCoin.body} />
+      };
     } catch (error) {
-      console.error('Mining error:', error);
+      console.error('Error handling coin collision:', error);
+    } finally {
+      // 일정 시간 후 충돌 상태 초기화
+      setTimeout(() => {
+        delete collisionRef.current[coinId];
+      }, 100);
     }
   };
 
@@ -188,7 +219,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
         const coinId = `Gold${Date.now()}`;
         if (entitiesRef.current) {
           entitiesRef.current[coinId] = {
-            ...goldCoin,
+            body: goldCoin.body,
             renderer: (props: any) => <Gold body={goldCoin.body} />
           };
         }
@@ -204,10 +235,13 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
 
     engine.world.gravity.y = 0.8;
 
+    // 바닥 위치를 화면 높이의 1/3 지점으로 조정
+    const floorY = (height * 2) / 3;  // 화면 높이의 2/3 지점 (아래에서 1/3 지점)
+
     // 바닥 생성
     const floor = Matter.Bodies.rectangle(
       width / 2,
-      height - 30,
+      floorY,
       width,
       60,
       {
@@ -220,23 +254,27 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     Matter.World.add(world, floor);
 
     // 고양이 캐릭터 생성
-    const cat = createCat(world, {
-      x: width / 4,
-      y: height - 250  // 코인과 같은 높이로 조정
-    });
-    const catEntity: Entity = {
-      ...cat,
-      renderer: (props: any) => <Cat body={cat.body} />
-    };
+    const cat = Matter.Bodies.rectangle(
+      width / 4,
+      floorY - 72,
+      72,
+      72,
+      {
+        label: 'cat',
+        friction: 1,
+        restitution: 0.2,
+      }
+    );
+    Matter.World.add(world, cat);
 
-    // 초기 코인 생성 - 다양한 높이에 배치
-    const initialCoins: { [key: string]: Entity } = {};
+    // 초기 코인 생성 - 화면 높이의 1/3보다 높게 배치
+    const initialCoins: { [key: string]: GameEntity } = {};
     Array(5).fill(null).forEach((_, i) => {
       const coin = createCoin(
         world,
         {
-          x: width / 2 + (i * 200),  // 코인 간격을 200으로 늘림
-          y: height - 250 + (Math.random() * 50)  // 점프로 먹을 수 있는 높이로 조정
+          x: width / 2 + (i * 200),
+          y: height / 3 - Math.random() * 50  // 화면 높이의 1/3보다 높은 위치에 랜덤 배치
         }
       );
       initialCoins[`coin${i}`] = {
@@ -247,7 +285,10 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
 
     const entities: GameEntities = {
       physics: { engine, world },
-      cat: catEntity,
+      cat: {
+        body: cat,
+        renderer: (props: any) => <Cat body={cat} />
+      },
       floor: {
         body: floor,
         renderer: (props: any) => (
@@ -255,14 +296,14 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
             style={{
               position: 'absolute',
               left: width / 2 - width / 2,
-              top: height - 60,
+              top: floorY - 30,  // 바닥 위치 조정
               width: width,
               height: 60,
-              backgroundColor: '#2E8B57',  // 초록색 바닥
+              backgroundColor: '#2E8B57',
             }}
           />
         ),
-        pos: { x: width / 2, y: height - 30 }
+        pos: { x: width / 2, y: floorY }
       }
     };
 
@@ -274,29 +315,30 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     // 충돌 이벤트 설정
     Matter.Events.on(engine, 'collisionStart', (event) => {
       event.pairs.forEach((collision) => {
-        if (collision.bodyA.label === 'cat') {
-          if (collision.bodyB.label === 'coin') {
-            Matter.World.remove(world, collision.bodyB);
-            setScore(prevScore => prevScore + 1);
-            handleCoinCollection(false);
+        const bodyA = collision.bodyA;
+        const bodyB = collision.bodyB;
 
-            // 새로운 코인 생성 - 화면 오른쪽 랜덤한 높이에 생성
-            const newCoin = createCoin(world, {
-              x: width + Math.random() * 100,
-              y: height - 250 + (Math.random() * 50)  // 새로운 코인도 같은 높이 범위에 생성
-            });
+        if (!bodyA || !bodyB) return; // 유효하지 않은 충돌 무시
 
-            if (entitiesRef.current) {
-              const coinId = `coin${Date.now()}`;
-              entitiesRef.current[coinId] = {
-                ...newCoin,
-                renderer: (props: any) => <Coin body={newCoin.body} />
-              };
-            }
-          } else if (collision.bodyB.label === 'gold') {
-            Matter.World.remove(world, collision.bodyB);
-            setScore(prevScore => prevScore + 5);
-            handleCoinCollection(true);
+        // 고양이와 다른 물체의 충돌 확인
+        const catBody = bodyA.label === 'cat' ? bodyA : (bodyB.label === 'cat' ? bodyB : null);
+        const otherBody = catBody === bodyA ? bodyB : bodyA;
+
+        // 고양이가 관련된 충돌인 경우만 처리
+        if (catBody && otherBody) {
+          switch (otherBody.label) {
+            case 'coin':
+              handleCoinCollision(otherBody, false);
+              break;
+
+            case 'gold':
+              handleCoinCollision(otherBody, true);
+              break;
+
+            case 'floor':
+              // 바닥 충돌 시 점프 카운트 리셋
+              handleFloorCollision();
+              break;
           }
         }
       });
@@ -315,7 +357,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
 
     // 코인 이동 및 재활용
     Object.entries(entities).forEach(([key, entity]) => {
-      if (key.startsWith('coin') && isEntity(entity)) {
+      if (key.startsWith('coin') && isGameEntity(entity)) {
         const coin = entity.body;
         Matter.Body.setPosition(coin, {
           x: coin.position.x - 2,
@@ -357,6 +399,12 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     return entities;
   };
 
+  const Physics = (entities: GameEntities) => {
+    let engine = entities.physics.engine;
+    Matter.Engine.update(engine, 16.666);
+    return entities;
+  };
+
   const saveScore = async () => {
     try {
       // Firebase 임시 비활성화
@@ -374,18 +422,50 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     }
   };
 
+  const resetJumpCount = () => {
+    setJumpCount(0);
+  };
+
+  const handleFloorCollision = () => {
+    resetJumpCount();
+  };
+
   const onJump = () => {
-    if (entitiesRef.current?.cat) {
-      const catBody = entitiesRef.current.cat.body;
-      // 현재 속도를 확인하여 바닥에 있는지 체크
+    const catEntity = entitiesRef.current?.cat;
+    if (catEntity && isGameEntity(catEntity)) {
+      const catBody = catEntity.body;
       const isOnGround = Math.abs(catBody.velocity.y) < 0.1;
 
-      if (isOnGround) {
-        Matter.Body.setVelocity(catBody, {
-          x: catBody.velocity.x,
-          y: -20  // 점프력 증가
-        });
+      console.log('Jump triggered', { isOnGround, jumpCount, velocity: catBody.velocity });  // 디버깅용 로그
+
+      // 바닥에 있거나 더블 점프가 가능한 경우
+      if (isOnGround || jumpCount < 2) {
+        let jumpVelocity;
+
+        if (isOnGround) {
+          // 첫 번째 점프
+          jumpVelocity = -15;
+          setJumpCount(1);
+          console.log('First jump', jumpVelocity);  // 디버깅용 로그
+        } else if (jumpCount === 1) {
+          // 두 번째 점프
+          jumpVelocity = -20;
+          setJumpCount(2);
+          console.log('Second jump', jumpVelocity);  // 디버깅용 로그
+        }
+
+        if (jumpVelocity) {
+          // 점프 속도 설정
+          Matter.Body.setVelocity(catBody, {
+            x: 5,
+            y: jumpVelocity
+          });
+
+          console.log('Applied velocity', { x: 5, y: jumpVelocity });  // 디버깅용 로그
+        }
       }
+    } else {
+      console.log('Cat entity not found or invalid', { catEntity });  // 디버깅용 로그
     }
   };
 
@@ -430,7 +510,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       // 게임 상태 초기화
       setRunning(false);
       setScore(0);
-      setEthMined(0);
+      setEthPoints(0);
       setCombo(0);
 
       // 로그인 화면으로 이동
@@ -484,6 +564,27 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     return colors[Math.min(combo - 1, colors.length - 1)];
   };
 
+  const EthPointsDisplay = () => (
+    <View style={{
+      position: 'absolute',
+      top: 50,
+      right: 20,
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      padding: 10,
+      borderRadius: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+    }}>
+      <Text style={{
+        color: '#00ff00',
+        fontSize: 24,
+        fontWeight: 'bold',
+      }}>
+        {ethPoints.toFixed(3)} ETH
+      </Text>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -496,7 +597,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       <GameEngine
         ref={gameEngineRef}
         style={styles.gameContainer}
-        systems={[updateGame, gameLoop]}
+        systems={[updateGame, gameLoop, Physics]}
         entities={setupWorld()}
         running={running}
         onEvent={(e) => {
@@ -504,7 +605,34 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
             setRunning(false);
           }
         }}
-      />
+      >
+        <StatusBar hidden={true} />
+        <EthPointsDisplay />
+        <TouchableOpacity
+          onPress={onJump}
+          style={{
+            position: 'absolute',
+            bottom: 50,
+            right: 30,
+            width: 100,
+            height: 100,
+            backgroundColor: 'rgba(0, 255, 0, 0.3)',
+            borderRadius: 50,
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 2,
+            borderColor: '#00ff00',
+          }}
+        >
+          <Text style={{
+            color: '#fff',
+            fontSize: 24,
+            fontWeight: 'bold',
+          }}>
+            JUMP
+          </Text>
+        </TouchableOpacity>
+      </GameEngine>
       {canFly ? (
         <Pressable
           style={[styles.jumpButton, isFlying && styles.flyingButton]}
@@ -529,11 +657,11 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#87CEEB', // 하늘색 배경
+    backgroundColor: '#87CEEB',  // 하늘색 배경
   },
   gameContainer: {
     flex: 1,
-    backgroundColor: '#87CEEB',
+    backgroundColor: '#87CEEB',  // 하늘색 배경
   },
   header: {
     flexDirection: 'row',
@@ -573,28 +701,23 @@ const styles = StyleSheet.create({
   jumpButton: {
     position: 'absolute',
     bottom: 50,
-    right: 50,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#4285F4',
+    right: 30,
+    width: 100,
+    height: 100,
+    backgroundColor: 'rgba(0, 255, 0, 0.3)',
+    borderRadius: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    borderWidth: 2,
+    borderColor: '#00ff00',
+    zIndex: 1000,
   },
   flyingButton: {
     backgroundColor: '#FFD700',
   },
   jumpButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    color: '#fff',
+    fontSize: 24,
     fontWeight: 'bold',
   },
 });
