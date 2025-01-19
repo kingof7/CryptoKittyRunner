@@ -104,9 +104,10 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   const collisionRef = useRef<{ [key: string]: boolean }>({});
 
   useEffect(() => {
-    setupWorld();
-    startGoldSpawner();
+    const entities = setupWorld();
+    entitiesRef.current = entities;
     initializeMiningService();
+
     const updateMiningStats = () => {
       if (miningServiceRef.current) {
         setMiningStats(miningServiceRef.current.getStats());
@@ -114,10 +115,8 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     };
 
     const statsInterval = setInterval(updateMiningStats, 1000);
+
     return () => {
-      saveScore();
-      if (flyingTimerRef.current) clearTimeout(flyingTimerRef.current);
-      if (GoldTimerRef.current) clearTimeout(GoldTimerRef.current);
       clearInterval(statsInterval);
     };
   }, []);
@@ -208,152 +207,70 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     }
   };
 
-  const startGoldSpawner = () => {
-    const spawnGold = () => {
-      if (Math.random() < 0.01) { // 1% 확률
-        const randomY = Math.random() * (height - 400) + 100; // 점프로 도달할 수 있는 높이
-        const goldCoin = createCoin(entitiesRef.current!.physics.world, {
-          x: width + 50,
-          y: randomY,
-        }, true);
+  const spawnGold = () => {
+    if (!entitiesRef.current?.physics?.world) {
+      console.log('Physics world not initialized');
+      return;
+    }
+
+    try {
+      // 골드 코인 생성
+      const goldCoin = createCoin(
+        entitiesRef.current.physics.world,
+        {
+          x: width + Math.random() * 100,
+          y: height / 3 - Math.random() * 50
+        },
+        true  // isGold = true
+      );
+
+      if (goldCoin && entitiesRef.current) {
         const coinId = `Gold${Date.now()}`;
-        if (entitiesRef.current) {
-          entitiesRef.current[coinId] = {
-            body: goldCoin.body,
-            renderer: (props: any) => <Gold body={goldCoin.body} />
-          };
-        }
+        entitiesRef.current[coinId] = {
+          body: goldCoin.body,
+          renderer: (props: any) => <Gold body={goldCoin.body} />
+        };
       }
-      GoldTimerRef.current = setTimeout(spawnGold, 1000);
-    };
-    spawnGold();
+    } catch (error) {
+      console.error('Error spawning gold:', error);
+    }
   };
 
-  const setupWorld = () => {
-    const engine = Matter.Engine.create({ enableSleeping: false });
-    const world = engine.world;
+  // 게임 시작 시 골드 코인 스폰 타이머 설정
+  useEffect(() => {
+    if (running) {
+      const goldSpawnInterval = setInterval(() => {
+        spawnGold();
+      }, 10000);  // 10초마다 골드 코인 생성
 
-    engine.world.gravity.y = 0.8;
-
-    // 바닥 위치를 화면 높이의 1/3 지점으로 조정
-    const floorY = (height * 2) / 3;  // 화면 높이의 2/3 지점 (아래에서 1/3 지점)
-
-    // 바닥 생성
-    const floor = Matter.Bodies.rectangle(
-      width / 2,
-      floorY,
-      width,
-      60,
-      {
-        isStatic: true,
-        label: 'floor',
-        friction: 1,
-        restitution: 0.2,
-      }
-    );
-    Matter.World.add(world, floor);
-
-    // 고양이 캐릭터 생성
-    const cat = Matter.Bodies.rectangle(
-      width / 4,
-      floorY - 72,
-      72,
-      72,
-      {
-        label: 'cat',
-        friction: 1,
-        restitution: 0.2,
-      }
-    );
-    Matter.World.add(world, cat);
-
-    // 초기 코인 생성 - 화면 높이의 1/3보다 높게 배치
-    const initialCoins: { [key: string]: GameEntity } = {};
-    Array(5).fill(null).forEach((_, i) => {
-      const coin = createCoin(
-        world,
-        {
-          x: width / 2 + (i * 200),
-          y: height / 3 - Math.random() * 50  // 화면 높이의 1/3보다 높은 위치에 랜덤 배치
-        }
-      );
-      initialCoins[`coin${i}`] = {
-        ...coin,
-        renderer: (props: any) => <Coin body={coin.body} />
+      return () => {
+        clearInterval(goldSpawnInterval);
       };
-    });
+    }
+  }, [running]);
 
-    const entities: GameEntities = {
-      physics: { engine, world },
-      cat: {
-        body: cat,
-        renderer: (props: any) => <Cat body={cat} />
-      },
-      floor: {
-        body: floor,
-        renderer: (props: any) => (
-          <View
-            style={{
-              position: 'absolute',
-              left: width / 2 - width / 2,
-              top: floorY - 30,  // 바닥 위치 조정
-              width: width,
-              height: 60,
-              backgroundColor: '#2E8B57',
-            }}
-          />
-        ),
-        pos: { x: width / 2, y: floorY }
-      }
-    };
+  const saveScore = async () => {
+    try {
+      const currentScore = await AsyncStorage.getItem('score') || '0';
+      const newScore = parseInt(currentScore) + score;
+      await AsyncStorage.setItem('score', newScore.toString());
+    } catch (error) {
+      console.error('Error saving score:', error);
+    }
+  };
 
-    // Add coins with their renderers
-    Object.entries(initialCoins).forEach(([key, coin]) => {
-      entities[key] = coin;
-    });
+  const resetJumpCount = () => {
+    setJumpCount(0);
+  };
 
-    // 충돌 이벤트 설정
-    Matter.Events.on(engine, 'collisionStart', (event) => {
-      event.pairs.forEach((collision) => {
-        const bodyA = collision.bodyA;
-        const bodyB = collision.bodyB;
-
-        if (!bodyA || !bodyB) return; // 유효하지 않은 충돌 무시
-
-        // 고양이와 다른 물체의 충돌 확인
-        const catBody = bodyA.label === 'cat' ? bodyA : (bodyB.label === 'cat' ? bodyB : null);
-        const otherBody = catBody === bodyA ? bodyB : bodyA;
-
-        // 고양이가 관련된 충돌인 경우만 처리
-        if (catBody && otherBody) {
-          switch (otherBody.label) {
-            case 'coin':
-              handleCoinCollision(otherBody, false);
-              break;
-
-            case 'gold':
-              handleCoinCollision(otherBody, true);
-              break;
-
-            case 'floor':
-              // 바닥 충돌 시 점프 카운트 리셋
-              handleFloorCollision();
-              break;
-          }
-        }
-      });
-    });
-
-    entitiesRef.current = entities;
-    return entities;
+  const handleFloorCollision = () => {
+    resetJumpCount();
   };
 
   const gameLoop = (entities: GameEntities) => {
     if (!running) return entities;
     const engine = entities.physics.engine;
     const world = entities.physics.world;
-
-    Matter.Engine.update(engine, 16.666);
 
     // 코인 이동 및 재활용
     Object.entries(entities).forEach(([key, entity]) => {
@@ -368,104 +285,189 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
         if (coin.position.x < -30) {
           Matter.Body.setPosition(coin, {
             x: width + 30,
-            y: height / 4 + Math.random() * (height / 2)
+            y: height / 3 - Math.random() * 50  // 화면 높이의 1/3보다 높은 위치에 랜덤 배치
           });
         }
       }
     });
 
-    // 플라잉 모드에서 고양이 상승/하강
-    if (isButtonPressedRef.current && entitiesRef.current?.cat && canFly) {
-      Matter.Body.setVelocity(entitiesRef.current.cat.body, {
-        x: 0,
-        y: -5
-      });
-    } else if (entitiesRef.current?.cat) {
-      // 중력 효과로 천천히 하강
-      const currentVelocity = entitiesRef.current.cat.body.velocity;
-      Matter.Body.setVelocity(entitiesRef.current.cat.body, {
-        x: 0,
-        y: Math.min(currentVelocity.y + 0.2, 5)  // 최대 하강 속도 제한
-      });
-    }
-
     return entities;
   };
 
   const updateGame = (entities: GameEntities) => {
+    if (!running) return entities;
+
     const engine = entities.physics.engine;
     Matter.Engine.update(engine, 16);
 
     return entities;
   };
 
-  const Physics = (entities: GameEntities) => {
-    let engine = entities.physics.engine;
-    Matter.Engine.update(engine, 16.666);
+  const setupCoins = (world: Matter.World) => {
+    const initialCoins: { [key: string]: GameEntity } = {};
+    Array(5).fill(null).forEach((_, i) => {
+      const coin = createCoin(
+        world,
+        {
+          x: width / 2 + (i * 200),
+          y: height / 3 - Math.random() * 50  // 화면 높이의 1/3보다 높은 위치에 랜덤 배치
+        }
+      );
+      initialCoins[`coin${i}`] = {
+        body: coin.body,
+        renderer: (props: any) => <Coin body={coin.body} />
+      };
+    });
+    return initialCoins;
+  };
+
+  const setupWorld = () => {
+    const engine = Matter.Engine.create({
+      enableSleeping: false,
+      gravity: { x: 0, y: 1 }
+    });
+    const world = engine.world;
+
+    const floorY = (height * 2) / 3;
+
+    // 바닥 생성
+    const floor = Matter.Bodies.rectangle(
+      width / 2,
+      floorY,
+      width,
+      60,
+      {
+        isStatic: true,
+        label: 'floor',
+        friction: 0.5,
+        restitution: 0,
+      }
+    );
+
+    // 고양이 생성
+    const cat = Matter.Bodies.rectangle(
+      width / 4,
+      floorY - 72,
+      72,
+      72,
+      {
+        label: 'cat',
+        friction: 0.5,
+        restitution: 0,
+        inertia: Infinity,
+        inverseInertia: 0
+      }
+    );
+
+    // 물리 엔진에 객체 추가
+    Matter.World.add(world, [floor, cat]);
+
+    // 충돌 이벤트 설정
+    Matter.Events.on(engine, 'collisionStart', (event) => {
+      event.pairs.forEach((collision) => {
+        const bodyA = collision.bodyA;
+        const bodyB = collision.bodyB;
+
+        if (!bodyA || !bodyB) return;
+
+        const catBody = bodyA.label === 'cat' ? bodyA : (bodyB.label === 'cat' ? bodyB : null);
+        const otherBody = catBody === bodyA ? bodyB : bodyA;
+
+        if (catBody && otherBody) {
+          switch (otherBody.label) {
+            case 'coin':
+              handleCoinCollision(otherBody, false);
+              break;
+            case 'gold':
+              handleCoinCollision(otherBody, true);
+              break;
+            case 'floor':
+              handleFloorCollision();
+              break;
+          }
+        }
+      });
+    });
+
+    // 초기 엔티티 생성
+    const entities: GameEntities = {
+      physics: { engine, world },
+      cat: {
+        body: cat,
+        renderer: (props: any) => <Cat body={cat} />
+      },
+      floor: {
+        body: floor,
+        renderer: (props: any) => (
+          <View
+            style={{
+              position: 'absolute',
+              left: width / 2 - width / 2,
+              top: floorY - 30,
+              width: width,
+              height: 60,
+              backgroundColor: '#2E8B57',
+            }}
+          />
+        )
+      }
+    };
+
+    // 코인 추가
+    const coins = setupCoins(world);
+    Object.entries(coins).forEach(([key, coin]) => {
+      entities[key] = coin;
+    });
+
+    // entitiesRef 업데이트
+    entitiesRef.current = entities;
+
     return entities;
   };
 
-  const saveScore = async () => {
-    try {
-      // Firebase 임시 비활성화
-      // const user = auth().currentUser;
-      // if (user) {
-      const currentScore = await AsyncStorage.getItem('score') || '0';
-      const newScore = parseInt(currentScore) + score;
-      await AsyncStorage.setItem('score', newScore.toString());
-      // await database()
-      //   .ref(`users/${user.uid}/score`)
-      //   .set(newScore);
-      // }
-    } catch (error) {
-      console.error('Error saving score:', error);
-    }
-  };
-
-  const resetJumpCount = () => {
-    setJumpCount(0);
-  };
-
-  const handleFloorCollision = () => {
-    resetJumpCount();
+  // 물리 엔진 업데이트 시스템
+  const Physics = (entities: GameEntities) => {
+    const { engine } = entities.physics;
+    Matter.Engine.update(engine, 16.666);
+    return entities;
   };
 
   const onJump = () => {
     const catEntity = entitiesRef.current?.cat;
     if (catEntity && isGameEntity(catEntity)) {
       const catBody = catEntity.body;
+
+      // 바닥 충돌 확인을 위한 y 속도 체크
       const isOnGround = Math.abs(catBody.velocity.y) < 0.1;
 
-      console.log('Jump triggered', { isOnGround, jumpCount, velocity: catBody.velocity });  // 디버깅용 로그
+      console.log('Jump triggered', {
+        isOnGround,
+        jumpCount,
+        position: catBody.position,
+        velocity: catBody.velocity
+      });
 
-      // 바닥에 있거나 더블 점프가 가능한 경우
       if (isOnGround || jumpCount < 2) {
-        let jumpVelocity;
+        let jumpForce;
 
         if (isOnGround) {
-          // 첫 번째 점프
-          jumpVelocity = -15;
+          jumpForce = -20;  // 첫 번째 점프
           setJumpCount(1);
-          console.log('First jump', jumpVelocity);  // 디버깅용 로그
         } else if (jumpCount === 1) {
-          // 두 번째 점프
-          jumpVelocity = -20;
+          jumpForce = -25;  // 두 번째 점프
           setJumpCount(2);
-          console.log('Second jump', jumpVelocity);  // 디버깅용 로그
         }
 
-        if (jumpVelocity) {
-          // 점프 속도 설정
+        if (jumpForce) {
+          // 점프 힘 적용
           Matter.Body.setVelocity(catBody, {
-            x: 5,
-            y: jumpVelocity
+            x: catBody.velocity.x,
+            y: jumpForce
           });
 
-          console.log('Applied velocity', { x: 5, y: jumpVelocity });  // 디버깅용 로그
+          console.log('Applied jump force', jumpForce);
         }
       }
-    } else {
-      console.log('Cat entity not found or invalid', { catEntity });  // 디버깅용 로그
     }
   };
 
