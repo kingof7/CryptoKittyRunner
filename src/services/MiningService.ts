@@ -1,17 +1,22 @@
 import { ethers } from 'ethers';
-import { MiningResult, MiningStats } from '../types/mining';
+import CryptoJS from 'crypto-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SHA3 } from 'crypto-js';
+import { RewardService } from './RewardService';
+import { MiningStats, MiningResult } from '../types/mining';
+
+const MINING_STATS_KEY = 'miningStats';
+const DEFAULT_DIFFICULTY = 4;
 
 export class MiningService {
   private miningStats: MiningStats = {
     totalMined: 0,
     combo: 0,
-    difficulty: 1,
+    difficulty: DEFAULT_DIFFICULTY,
     lastMiningTime: 0
   };
   private provider: ethers.providers.JsonRpcProvider;
   private wallet: ethers.Wallet;
+  private rewardService: RewardService;
 
   constructor(privateKey: string) {
     const network = process.env.ETHEREUM_NETWORK || 'sepolia';
@@ -20,13 +25,14 @@ export class MiningService {
 
     this.provider = new ethers.providers.JsonRpcProvider(providerUrl);
     this.wallet = new ethers.Wallet(privateKey, this.provider);
+    this.rewardService = new RewardService(privateKey);
 
     this.loadMiningStats();
   }
 
   private async loadMiningStats() {
     try {
-      const stats = await AsyncStorage.getItem('mining_stats');
+      const stats = await AsyncStorage.getItem(MINING_STATS_KEY);
       if (stats) {
         this.miningStats = JSON.parse(stats);
       }
@@ -37,7 +43,7 @@ export class MiningService {
 
   private async saveMiningStats() {
     try {
-      await AsyncStorage.setItem('mining_stats', JSON.stringify(this.miningStats));
+      await AsyncStorage.setItem(MINING_STATS_KEY, JSON.stringify(this.miningStats));
     } catch (error) {
       console.error('Error saving mining stats:', error);
     }
@@ -45,51 +51,12 @@ export class MiningService {
 
   private updateCombo() {
     const now = Date.now();
-    if (now - this.miningStats.lastMiningTime < 2000) { // 2초 이내 연속 채굴
-      this.miningStats.combo = Math.min(this.miningStats.combo + 1, 5);
+    if (now - this.miningStats.lastMiningTime < 10000) { // 10초 이내에 채굴
+      this.miningStats.combo++;
     } else {
-      this.miningStats.combo = 0;
+      this.miningStats.combo = 1;
     }
     this.miningStats.lastMiningTime = now;
-  }
-
-  private async performMining(
-    difficulty: number,
-    combo: number,
-    blockData: {
-      timestamp: number;
-      lastHash: string;
-      data: string;
-      reward: number;
-    }
-  ): Promise<MiningResult> {
-    const target = '0'.repeat(Math.min(difficulty + Math.floor(combo / 2), 4));
-    let nonce = 0;
-    const startTime = Date.now();
-
-    while (true) {
-      const timestamp = Date.now();
-      const dataToHash = `${blockData.lastHash}${timestamp}${JSON.stringify(blockData.data)}${nonce}${combo}`;
-      const hash = SHA3(dataToHash).toString();
-
-      if (hash.substring(0, target.length) === target) {
-        const comboMultiplier = 1 + (Math.min(combo, 5) * 0.2); // Max 2x multiplier at 5 combo
-        const finalReward = blockData.reward * comboMultiplier;
-
-        return {
-          success: true,
-          hash,
-          nonce,
-          reward: finalReward
-        };
-      }
-
-      if (nonce > 1000000 || Date.now() - startTime > 5000) { // 5초 제한
-        return { success: false };
-      }
-
-      nonce++;
-    }
   }
 
   public async mineCoin(isGolden: boolean = false): Promise<MiningResult> {
@@ -103,44 +70,48 @@ export class MiningService {
       Number(process.env.MINING_REWARD_REGULAR || 0.0001);
 
     try {
-      const result = await this.performMining(
-        baseDifficulty,
-        this.miningStats.combo,
-        {
-          timestamp: Date.now(),
-          lastHash: ethers.utils.id(Date.now().toString()),
-          data: `CryptoKittyRunner-${isGolden ? 'golden' : 'regular'}-coin`,
-          reward: baseReward
-        }
-      );
+      const nonce = Math.floor(Math.random() * 1000000).toString();
+      const data = this.wallet.address + nonce;
+      const hash = CryptoJS.SHA3(data, { outputLength: 256 }).toString();
 
-      if (result.success && result.reward) {
-        try {
-          // 테스트넷에 트랜잭션 전송
-          const tx = await this.wallet.sendTransaction({
-            to: this.wallet.address,
-            value: ethers.utils.parseEther(result.reward.toString())
-          });
+      const difficulty = baseDifficulty + Math.floor(this.miningStats.combo / 10);
+      const target = '0'.repeat(difficulty);
 
-          // 통계 업데이트
-          this.miningStats.totalMined += result.reward;
-          await this.saveMiningStats();
+      if (hash.startsWith(target)) {
+        const comboMultiplier = 1 + (this.miningStats.combo - 1) * 0.1; // 10% 증가
+        const reward = baseReward * comboMultiplier;
 
-          return result;
-        } catch (error) {
-          console.error('Error sending mining reward:', error);
-          return { success: false };
-        }
+        // 리워드를 스마트 컨트랙트에 기록
+        await this.rewardService.addReward(this.wallet.address, reward);
+
+        // 로컬 통계 업데이트
+        this.miningStats.totalMined += reward;
+        await this.saveMiningStats();
+
+        return {
+          success: true,
+          reward,
+          hash
+        };
       }
 
-      return { success: false };
+      return {
+        success: false,
+        hash
+      };
     } catch (error) {
       console.error('Mining error:', error);
-      return { success: false };
+      return {
+        success: false
+      };
     }
   }
 
   public getStats(): MiningStats {
     return { ...this.miningStats };
+  }
+
+  public async getPendingRewards(): Promise<number> {
+    return this.rewardService.getPendingRewards(this.wallet.address);
   }
 }

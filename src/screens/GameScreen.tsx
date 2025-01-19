@@ -11,6 +11,7 @@ import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameScreenProps } from '../types/navigation';
 import { MiningService } from '../services/MiningService';
+import { MiningStats } from '../types/mining';
 import * as ethers from 'ethers';
 
 const { width, height } = Dimensions.get('window');
@@ -23,13 +24,6 @@ interface GameEntities {
   cat: ReturnType<typeof Cat>;
   floor: ReturnType<typeof Floor>;
   [key: string]: any;
-}
-
-interface MiningStats {
-  totalMined: number;
-  combo: number;
-  difficulty: number;
-  lastMiningTime: number;
 }
 
 const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
@@ -98,7 +92,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       const result = await miningServiceRef.current.mineCoin(isGolden);
       if (result.success && result.reward) {
         setMiningStats(miningServiceRef.current.getStats());
-        
+
         // Show mining success message with animation
         Alert.alert(
           'Mining Success! 🎉',
