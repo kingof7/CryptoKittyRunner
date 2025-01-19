@@ -53,37 +53,37 @@ const createCoin = (world: Matter.World, pos: { x: number; y: number }, isGolden
 };
 
 // 렌더러 컴포넌트 정의
-const FloorRenderer: React.FC<{ body: Matter.Body; width: number }> = ({ body, width }) => {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        left: body.position.x - width / 2,
-        top: body.position.y - 10,
-        width: width,
-        height: 20,
-        backgroundColor: '#3f3f3f'
-      }}
-    />
-  );
-};
+const Ground = ({ body, width }: { body: Matter.Body; width: number }) => (
+  <View
+    style={{
+      position: 'absolute',
+      left: body.position.x - width / 2,
+      top: body.position.y - 10,
+      width: width,
+      height: 20,
+      backgroundColor: '#3f3f3f'
+    }}
+  />
+);
 
-const CatRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        left: body.position.x - 25,
-        top: body.position.y - 25,
-        width: 50,
-        height: 50,
-        backgroundColor: '#ffd700'
-      }}
-    />
-  );
-};
+const Player = ({ body }: { body: Matter.Body }) => (
+  <View
+    style={{
+      position: 'absolute',
+      left: body.position.x - 25,
+      top: body.position.y - 25,
+      width: 50,
+      height: 50,
+      backgroundColor: '#FFA500',
+      borderRadius: 25,
+      borderWidth: 2,
+      borderColor: '#FF8C00'
+    }}
+  />
+);
 
-const CoinRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
+const Coin = ({ body }: { body: Matter.Body }) => {
+  const isGolden = body.label === 'GoldenCoin';
   return (
     <View
       style={{
@@ -93,14 +93,21 @@ const CoinRenderer: React.FC<{ body: Matter.Body }> = ({ body }) => {
         width: 30,
         height: 30,
         borderRadius: 15,
-        backgroundColor: '#ffdf00'
+        backgroundColor: isGolden ? '#FFD700' : '#FFC107',
+        borderWidth: 2,
+        borderColor: isGolden ? '#DAA520' : '#FFA000',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5
       }}
     />
   );
 };
 
 interface EntityRenderer {
-  type: 'floor' | 'cat' | 'coin' | 'goldenCoin';
+  type: 'ground' | 'player' | 'coin' | 'goldencoin';
   props: any;
 }
 
@@ -178,20 +185,9 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   }, []);
 
   const initializeMiningService = async () => {
-    try {
-      // 실제 구현시에는 안전한 방법으로 private key를 관리해야 합니다
-      const privateKey = await AsyncStorage.getItem('wallet_private_key');
-      if (privateKey) {
-        miningServiceRef.current = new MiningService(privateKey);
-      } else {
-        // 테스트용 지갑 생성 (실제 서비스에서는 이렇게 하면 안 됩니다)
-        const wallet = ethers.Wallet.createRandom();
-        await AsyncStorage.setItem('wallet_private_key', wallet.privateKey);
-        miningServiceRef.current = new MiningService(wallet.privateKey);
-      }
-    } catch (error) {
-      console.error('Error initializing mining service:', error);
-    }
+    // 임시로 비활성화
+    console.log('Mining Service is temporarily disabled');
+    return;
   };
 
   const handleCoinCollection = async (isGolden: boolean) => {
@@ -229,7 +225,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
         if (entitiesRef.current) {
           entitiesRef.current[coinId] = {
             ...goldenCoin,
-            renderer: { type: 'goldenCoin', props: {} }
+            renderer: { type: 'goldencoin', props: {} }
           };
         }
       }
@@ -250,7 +246,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     const floorEntity: Entity = {
       ...floor,
       renderer: {
-        type: 'floor',
+        type: 'ground',
         props: { width: width }
       }
     };
@@ -260,7 +256,7 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     const catEntity: Entity = {
       ...cat,
       renderer: {
-        type: 'cat',
+        type: 'player',
         props: {}
       }
     };
@@ -322,6 +318,16 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
     return entities;
   };
 
+  const handleJump = () => {
+    if (!entitiesRef.current?.cat?.body) return;
+
+    const force = -8; // 점프 힘을 더 크게 조정
+    Matter.Body.setVelocity(entitiesRef.current.cat.body, {
+      x: 0,
+      y: force
+    });
+  };
+
   const gameLoop = (entities: GameEntities) => {
     if (!running) return entities;
     const engine = entities.physics.engine;
@@ -363,13 +369,6 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
       }
     } catch (error) {
       console.error('Error saving score:', error);
-    }
-  };
-
-  const onJump = () => {
-    if (!canFly && jumpCount < 2 && entitiesRef.current?.cat) {
-      Matter.Body.setVelocity(entitiesRef.current.cat.body, { x: 0, y: -10 });
-      setJumpCount(prev => prev + 1);
     }
   };
 
@@ -463,18 +462,18 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
   };
 
   // 렌더링 시스템
-  const renderEntity = (entity: Entity | PhysicsEntity) => {
-    if ('engine' in entity) return null;
+  const renderEntity = (entity: Entity) => {
+    if (!entity?.renderer) return null;
 
     const { body, renderer } = entity;
     switch (renderer.type) {
-      case 'floor':
-        return <FloorRenderer body={body} {...renderer.props} />;
-      case 'cat':
-        return <CatRenderer body={body} {...renderer.props} />;
+      case 'ground':
+        return <Ground body={body} {...renderer.props} />;
+      case 'player':
+        return <Player body={body} {...renderer.props} />;
       case 'coin':
-      case 'goldenCoin':
-        return <CoinRenderer body={body} {...renderer.props} />;
+      case 'goldencoin':
+        return <Coin body={body} {...renderer.props} />;
       default:
         return null;
     }
@@ -482,46 +481,35 @@ const GameScreen: React.FC<GameScreenProps> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.scoreText}>Score: {score}</Text>
-        <Text style={styles.ethText}>ETH: {ethMined.toFixed(6)}</Text>
-        <Text style={[styles.comboText, { color: getComboColor(combo) }]}>
-          Combo: {combo}x
-        </Text>
-      </View>
       <GameEngine
         ref={gameEngineRef}
         style={styles.gameContainer}
         systems={[gameLoop]}
         entities={setupWorld()}
-        running={running}
-        onEvent={(e) => {
-          if (e.type === 'step' && entitiesRef.current) {
-            Object.entries(entitiesRef.current).forEach(([key, entity]) => {
-              if (key !== 'physics') {
-                renderEntity(entity);
-              }
-            });
+        onEvent={(e: any) => {
+          if (e.type === 'game-over') {
+            setRunning(false);
           }
         }}
-      />
-      {canFly ? (
-        <Pressable
-          style={[styles.jumpButton, isFlying && styles.flyingButton]}
-          onPressIn={handleFlyingPress}
-          onPressOut={handleFlyingRelease}
-        >
-          <Text style={styles.jumpButtonText}>FLY</Text>
-        </Pressable>
-      ) : (
-        <TouchableOpacity
-          style={styles.jumpButton}
-          onPress={onJump}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.jumpButtonText}>JUMP</Text>
-        </TouchableOpacity>
-      )}
+        running={running}
+      >
+        <View style={styles.score}>
+          <Text style={styles.scoreText}>Score: {score}</Text>
+          <Text style={styles.scoreText}>ETH: {ethMined.toFixed(6)}</Text>
+        </View>
+      </GameEngine>
+      <TouchableOpacity
+        style={styles.jumpButton}
+        onPressIn={() => {
+          isButtonPressedRef.current = true;
+          handleJump();
+        }}
+        onPressOut={() => {
+          isButtonPressedRef.current = false;
+        }}
+      >
+        <Text style={styles.jumpButtonText}>JUMP</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -531,71 +519,50 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5FCFF',
   },
-  header: {
+  gameContainer: {
+    flex: 1,
+    backgroundColor: '#87CEEB',
+  },
+  score: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    right: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 50,
-    backgroundColor: '#4285F4',
   },
   scoreText: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
-  },
-  ethText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFD700',
-  },
-  comboText: {
-    fontSize: 14,
-    fontWeight: 'bold',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
-  flyingText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFD700',
-  },
-  logoutText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    textDecorationLine: 'underline',
-  },
-  gameContainer: {
-    flex: 1,
-    backgroundColor: '#87CEEB',
-  },
   jumpButton: {
     position: 'absolute',
-    bottom: 50,
-    right: 50,
+    bottom: 40,
+    right: 40,
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#4285F4',
+    backgroundColor: '#4CAF50',
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 5,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-  },
-  flyingButton: {
-    backgroundColor: '#FFD700',
   },
   jumpButtonText: {
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
 });
 

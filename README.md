@@ -232,3 +232,10 @@ cp .env.example .env
 - 환경 변수 파일 (.env)은 절대 Git에 커밋하지 않기
 - Firebase 설정 파일은 절대 Git에 커밋하지 않기
 - 개인 키나 토큰은 안전한 방식으로 관리
+
+### 5. 프로덕션 모드로 실행 iOS, Android, reload app, open Dev Menu, open DevTools
+### ***(개발자 모드에서 소스맵 안만들기, 소스코드 노출 방지)***
+-   $ export PATH="/opt/homebrew/bin:/opt/homebrew/opt/node@20/bin:$PATH"
+-   $ cd CryptoKittyRunner && yes | npm install --save-dev @react-native-community/cli
+-   $ npm install @react-native/metro-config
+-   $ NODE_ENV=production npx react-native start
